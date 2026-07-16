@@ -1,0 +1,14 @@
+{
+    "theme": "light",
+    "ai_engine": "GitHub Copilot",
+    "ai_endpoint": "",
+    "ai_api_key": "",
+    "connection_string": "",
+    "db_server": "",
+    "db_name": "",
+    "db_user": "",
+    "db_password": "",
+    "language": "es",
+    "ui_scale": "100%",
+    "version": 1
+}

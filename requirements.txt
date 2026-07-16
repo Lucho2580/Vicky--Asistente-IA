@@ -1,0 +1,10 @@
+# Interfaz gráfica
+customtkinter>=5.2
+
+# Opcional: si está instalado, la prueba de conexión a SQL Server usa una
+# conexión real; si no está instalado, se hace un fallback automático a una
+# prueba de conectividad de red (socket). La app funciona en ambos casos.
+# pyodbc
+
+# Calidad / desarrollo
+pytest>=8.0

@@ -1,0 +1,5 @@
+# Dependencias necesarias SOLO para compilar el instalador .msi
+# (no son necesarias para ejecutar la app con "python main.py").
+#
+# Uso: pip install -r requirements.txt -r packaging/requirements-build.txt
+pyinstaller>=6.0

@@ -1,0 +1,65 @@
+name: Build Windows MSI
+
+# Genera el instalador .msi de "Asistente IA - La Vianda" en un runner
+# real de Windows (windows-latest), sin que necesites tener Windows en
+# tu propia computadora. El .msi resultante queda disponible para
+# descargar como "artifact" del workflow.
+#
+# Cómo usarlo:
+#   1. Sube este repositorio a GitHub.
+#   2. Ve a la pestaña "Actions" del repo.
+#   3. Ejecuta manualmente "Build Windows MSI" (o crea un tag "v1.0.0"
+#      y haz push: git tag v1.0.0 && git push origin v1.0.0).
+#   4. Cuando termine (unos minutos), entra al resultado del workflow y
+#      descarga el artifact "AsistenteIA-Setup" — ahí está el .msi.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-msi:
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generar ejecutable con PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/pyinstaller/app.spec
+
+      - name: Instalar WiX Toolset
+        run: choco install wixtoolset -y
+
+      - name: Agregar WiX Toolset al PATH
+        run: |
+          $wixBin = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*\bin" -Directory | Select-Object -First 1
+          echo "$($wixBin.FullName)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Generar Files.wxs con heat.exe
+        run: heat.exe dir dist\AsistenteIA -o packaging\wix\Files.wxs -ag -srd -cg AppFiles -dr INSTALLFOLDER -var var.SourceDir
+
+      - name: Compilar con candle.exe
+        run: candle.exe -dSourceDir=dist\AsistenteIA -out packaging\wix\obj\ packaging\wix\Product.wxs packaging\wix\Files.wxs
+
+      - name: Enlazar con light.exe (genera el .msi)
+        run: light.exe -ext WixUIExtension -sval -out dist\AsistenteIA-Setup.msi packaging\wix\obj\Product.wixobj packaging\wix\obj\Files.wixobj
+
+      - name: Publicar el instalador como artifact descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsistenteIA-Setup
+          path: dist\AsistenteIA-Setup.msi

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Definición del instalador MSI para "Asistente IA - La Vianda",
+  usando WiX Toolset v3 (candle.exe + light.exe).
+
+  Este archivo describe el producto, sus carpetas de instalación y sus
+  accesos directos. La lista real de archivos a instalar (el contenido
+  de dist/AsistenteIA generado por PyInstaller) se genera aparte con
+  heat.exe en Files.wxs y se referencia aquí vía ComponentGroupRef.
+
+  IMPORTANTE: UpgradeCode es fijo y NO debe cambiar entre versiones:
+  es lo que permite que un instalador nuevo reemplace correctamente
+  al anterior en vez de instalarse en paralelo.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Asistente IA - La Vianda"
+           Language="1033"
+           Version="1.0.0.0"
+           Manufacturer="La Vianda"
+           UpgradeCode="755C98A5-480D-440E-A7F2-BC176B2DA485">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="Instalador de Asistente IA - La Vianda"
+             Manufacturer="La Vianda" />
+
+    <MajorUpgrade DowngradeErrorMessage="Ya existe una versión más nueva de Asistente IA - La Vianda instalada." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="Asistente IA - La Vianda" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="ApplicationShortcuts" />
+    </Feature>
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.SourceDir)/AsistenteIA.exe" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Asistente IA La Vianda" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Asistente IA - La Vianda" />
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <!-- Accesos directos: menú Inicio + escritorio + desinstalar -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcuts" Guid="FA4AC0B4-7B4A-4641-80E7-D3666B6C0AE5">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="Asistente IA - La Vianda"
+                  Description="Asistente IA de escritorio para La Vianda"
+                  Target="[INSTALLFOLDER]AsistenteIA.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="DesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="Asistente IA - La Vianda"
+                  Description="Asistente IA de escritorio para La Vianda"
+                  Target="[INSTALLFOLDER]AsistenteIA.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="UninstallShortcut"
+                  Name="Desinstalar Asistente IA - La Vianda"
+                  Target="[System64Folder]msiexec.exe"
+                  Arguments="/x [ProductCode]"
+                  Description="Desinstala Asistente IA - La Vianda" />
+        <RemoveFolder Id="CleanUpProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                        Key="Software\LaVianda\AsistenteIA"
+                        Name="installed"
+                        Type="integer"
+                        Value="1"
+                        KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+  </Product>
+</Wix>
