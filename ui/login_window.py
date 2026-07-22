@@ -1,3 +1,30 @@
+"""
+Pantalla de login, mostrada como un OVERLAY dentro de la misma ventana
+raíz de la aplicación — no como una segunda ventana/raíz de Tkinter
+separada.
+
+Esto es importante y corrige un bug real: customtkinter mantiene un
+rastreador interno de escala de pantalla (DPI) por cada raíz `ctk.CTk()`
+que se crea. Si se crea una raíz para el login y, al terminar, se la
+destruye para crear una raíz DISTINTA para la ventana principal, ese
+rastreador deja llamadas `after()` programadas contra un intérprete
+Tcl que ya no existe — y aparecen errores como:
+
+    invalid command name "...update"
+    invalid command name "..._set_scaled_min_max"
+    invalid command name "...check_dpi_scaling"
+
+La solución es tener una única raíz `ctk.CTk()` para toda la vida de
+la aplicación (ver ui/main_window.py): el login es solo un `CTkFrame`
+que se muestra primero y se destruye a sí mismo al terminar, dejando
+lugar al resto de la interfaz en la MISMA ventana.
+
+Intenta primero un login silencioso (si ya se inició sesión antes en
+esta computadora, no vuelve a pedir nada). Si no hay sesión guardada,
+exige "Iniciar sesión con Microsoft" (código de dispositivo) — el
+acceso está centralizado en la cuenta de correo de Microsoft, no
+existe una vía para entrar sin loguearse.
+"""
 import threading
 import webbrowser
 
@@ -7,14 +34,11 @@ from core.microsoft_auth import MicrosoftAuthService, is_configured
 from ui import theme
 
 
-class LoginWindow(ctk.CTk):
-    """Ventana de login mostrada antes de abrir la app."""
+class LoginOverlay(ctk.CTkFrame):
+    """Overlay de login, mostrado dentro de la ventana principal antes que el resto de la UI."""
 
-    def __init__(self, on_complete):
-        super().__init__()
-        self.title("Iniciar sesión - Asistente IA La Vianda")
-        self.geometry("480x440")
-        self.minsize(480, 440)
+    def __init__(self, master, on_complete, **kwargs):
+        super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
 
         self._on_complete = on_complete
         self._auth_service = MicrosoftAuthService()
@@ -25,8 +49,6 @@ class LoginWindow(ctk.CTk):
         self.after(200, self._try_silent_login)
 
     def _build_ui(self) -> None:
-        self.configure(fg_color=theme.BACKGROUND_LIGHT)
-
         container = ctk.CTkFrame(self, fg_color="transparent")
         container.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -129,8 +151,11 @@ class LoginWindow(ctk.CTk):
     def _handle_silent_result(self, display_name: str | None) -> None:
         if display_name:
             self._complete(display_name)
-        else:
+            return
+        try:
             self._status_label.configure(text="Inicia sesión con tu cuenta de Microsoft para continuar.")
+        except Exception:
+            pass  # el overlay ya se pudo haber destruido (login completado por otra vía)
 
     # ------------------------------------------------------------------ #
     # Login interactivo (código de dispositivo)
@@ -162,7 +187,10 @@ class LoginWindow(ctk.CTk):
             pass  # sin navegador disponible (ej. entorno headless): el usuario lo abre a mano
 
     def _handle_login_result(self, success: bool, display_name: str | None, message: str) -> None:
-        self._login_button.configure(state="normal", text="🔑 Iniciar sesión con Microsoft")
+        try:
+            self._login_button.configure(state="normal", text="🔑 Iniciar sesión con Microsoft")
+        except Exception:
+            return  # el overlay ya se pudo haber destruido (login exitoso concurrente)
         if success:
             self._complete(display_name or "Usuario")
         else:
@@ -181,5 +209,8 @@ class LoginWindow(ctk.CTk):
         if self._completed:
             return
         self._completed = True
-        self.destroy()
+        try:
+            self.destroy()  # destruye este FRAME, nunca la ventana raíz
+        except Exception:
+            pass
         self._on_complete(display_name)

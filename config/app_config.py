@@ -5,6 +5,9 @@ from core.env_config import (
     get_ai_api_key_from_env,
     get_ai_endpoint_from_env,
     get_ai_engine_from_env,
+    get_update_endpoint_from_env,
+    get_update_github_repo_from_env,
+    get_update_source_from_env,
 )
 from core.paths import SETTINGS_PATH
 
@@ -25,6 +28,17 @@ class AppSettings:
     language: str = "es"
     ui_scale: str = "100%"
     version: int = 1
+
+    # --- Actualizaciones ---
+    auto_check_updates: bool = True
+    check_updates_on_startup: bool = True
+    update_channel: str = "estable"       # "estable" | "beta"
+    update_frequency: str = "diaria"       # "diaria" | "semanal" | "manual"
+    update_source: str = "custom"           # "custom" (endpoint propio) | "github"
+    update_endpoint: str = ""                # URL del endpoint propio (source="custom")
+    update_github_repo: str = ""              # "usuario/repositorio" (source="github")
+    last_update_check: str = ""                # ISO 8601 del último chequeo realizado
+    silent_updates_enabled: bool = False        # preparado, deshabilitado por defecto
 
 
 class AppConfig:
@@ -64,6 +78,17 @@ class AppConfig:
             settings.ai_api_key = env_api_key
         if env_engine:
             settings.ai_engine = env_engine
+
+        env_update_source = get_update_source_from_env()
+        env_update_endpoint = get_update_endpoint_from_env()
+        env_update_github_repo = get_update_github_repo_from_env()
+
+        if env_update_source:
+            settings.update_source = env_update_source
+        if env_update_endpoint:
+            settings.update_endpoint = env_update_endpoint
+        if env_update_github_repo:
+            settings.update_github_repo = env_update_github_repo
 
     @property
     def settings(self) -> AppSettings:

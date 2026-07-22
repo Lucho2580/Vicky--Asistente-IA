@@ -16,7 +16,7 @@
   <Product Id="*"
            Name="Asistente IA - La Vianda"
            Language="1033"
-           Version="1.0.0.0"
+           Version="$(var.ProductVersion)"
            Manufacturer="La Vianda"
            UpgradeCode="755C98A5-480D-440E-A7F2-BC176B2DA485">
 
@@ -37,6 +37,32 @@
     <Icon Id="AppIcon.ico" SourceFile="$(var.SourceDir)/AsistenteIA.exe" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
     <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+
+    <!-- ==============================================================
+         Interfaz del instalador: Bienvenida -> Licencia -> Carpeta de
+         instalación -> Progreso -> Finalizar. La pantalla de Finalizar
+         incluye un checkbox "Iniciar Asistente IA - La Vianda" (tildado
+         por defecto) que abre la app apenas termina la instalación,
+         sin que el usuario tenga que buscarla manualmente.
+         ============================================================== -->
+    <WixVariable Id="WixUILicenseRtf" Value="packaging/wix/license.rtf" />
+    <UIRef Id="WixUI_InstallDir" />
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Iniciar Asistente IA - La Vianda" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+
+    <!-- Ruta del ejecutable a abrir al finalizar: se arma con la carpeta
+         de instalación (INSTALLFOLDER) + el nombre del .exe, en vez de
+         referenciar el Id de archivo autogenerado por heat.exe (que no
+         es predecible) -->
+    <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]AsistenteIA.exe" />
+    <CustomAction Id="LaunchApplication" BinaryKey="WixCA" DllEntry="WixShellExec" Impersonate="yes" />
+
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">
+        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed
+      </Publish>
+    </UI>
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">

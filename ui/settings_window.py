@@ -7,11 +7,10 @@ import customtkinter as ctk
 
 from config.app_config import AppConfig
 from core.paths import CONVERSATIONS_DB_PATH, LOGS_DIR, TRAINING_DIR
+from core.version import APP_BUILD, APP_VERSION, BUILD_DATE
 from database.sqlserver import SQLServerCredentials, SQLServerDatabase
 from services.knowledge_base import UnsupportedFileTypeError
 from ui import theme
-
-APP_VERSION = "0.2.0"
 
 
 class Card(ctk.CTkFrame):
@@ -80,6 +79,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
         knowledge_base=None,
         qa_log_service=None,
         connection_log_service=None,
+        on_check_updates_now=None,
         **kwargs,
     ):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
@@ -89,8 +89,10 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self._knowledge_base = knowledge_base
         self._qa_log_service = qa_log_service
         self._connection_log_service = connection_log_service
+        self._on_check_updates_now = on_check_updates_now
         self._build_database_card()
         self._build_knowledge_base_card()
+        self._build_updates_card()
         self._build_appearance_card()
         self._build_system_card()
 
@@ -472,6 +474,72 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self.qa_log_box.configure(state="disabled")
 
     # ------------------------------------------------------------------ #
+    # Tarjeta: ACTUALIZACIONES
+    # ------------------------------------------------------------------ #
+    def _build_updates_card(self) -> None:
+        settings = self._config.settings
+        card = Card(
+            self,
+            "ACTUALIZACIONES",
+            "Controla cómo y cuándo se busca una nueva versión del asistente.",
+        )
+        card.pack(fill="x", padx=24, pady=12)
+
+        self._auto_check_switch = ctk.CTkSwitch(
+            card, text="Buscar actualizaciones automáticamente", progress_color=theme.PRIMARY_BLUE,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
+        )
+        if settings.auto_check_updates:
+            self._auto_check_switch.select()
+        self._auto_check_switch.pack(anchor="w", padx=20, pady=(0, 8))
+
+        self._check_on_startup_switch = ctk.CTkSwitch(
+            card, text="Buscar al iniciar la aplicación", progress_color=theme.PRIMARY_BLUE,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
+        )
+        if settings.check_updates_on_startup:
+            self._check_on_startup_switch.select()
+        self._check_on_startup_switch.pack(anchor="w", padx=20, pady=(0, 12))
+
+        channel_map = {"estable": "Estable", "beta": "Beta"}
+        self._update_channel_var = ctk.StringVar(value=channel_map.get(settings.update_channel, "Estable"))
+        channel_row = ctk.CTkFrame(card, fg_color="transparent")
+        channel_row.pack(fill="x", padx=20, pady=(0, 6))
+        ctk.CTkLabel(
+            channel_row, text="Canal:", font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
+            text_color=theme.TEXT_MUTED, width=140, anchor="w",
+        ).pack(side="left")
+        for label in ["Estable", "Beta"]:
+            ctk.CTkRadioButton(
+                channel_row, text=label, value=label, variable=self._update_channel_var, fg_color=theme.PRIMARY_BLUE,
+            ).pack(side="left", padx=(0, 16))
+
+        self._update_frequency_menu = card.add_field(
+            "Frecuencia", ctk.CTkOptionMenu, values=["Diaria", "Semanal", "Manual"]
+        )
+        frequency_map = {"diaria": "Diaria", "semanal": "Semanal", "manual": "Manual"}
+        self._update_frequency_menu.set(frequency_map.get(settings.update_frequency, "Diaria"))
+
+        last_check_text = settings.last_update_check[:16].replace("T", " ") if settings.last_update_check else "Nunca"
+        self._last_check_label = ctk.CTkLabel(
+            card, text=f"Última verificación: {last_check_text}",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=9), text_color=theme.TEXT_MUTED,
+        )
+        self._last_check_label.pack(anchor="w", padx=20, pady=(4, 8))
+
+        check_now_button = ctk.CTkButton(
+            card, text="Buscar actualizaciones ahora", corner_radius=theme.CORNER_RADIUS,
+            fg_color=theme.PRIMARY_BLUE, hover_color=theme.PRIMARY_BLUE_HOVER,
+            command=self._handle_check_updates_now,
+        )
+        check_now_button.pack(anchor="w", padx=20, pady=(0, 4))
+        card.add_footer_spacer()
+
+    def _handle_check_updates_now(self) -> None:
+        if self._on_check_updates_now:
+            self._on_check_updates_now()
+
+    # ------------------------------------------------------------------ #
     # Tarjeta: APARIENCIA
     # ------------------------------------------------------------------ #
     def _build_appearance_card(self) -> None:
@@ -564,6 +632,8 @@ class SettingsPage(ctk.CTkScrollableFrame):
     # ------------------------------------------------------------------ #
     def save(self) -> None:
         label_to_theme = {"Claro": "light", "Oscuro": "dark", "Automático": "auto"}
+        channel_label_to_value = {"Estable": "estable", "Beta": "beta"}
+        frequency_label_to_value = {"Diaria": "diaria", "Semanal": "semanal", "Manual": "manual"}
         self._config.update(
             db_server=self.db_server_entry.get(),
             db_name=self.db_name_entry.get(),
@@ -573,4 +643,8 @@ class SettingsPage(ctk.CTkScrollableFrame):
             theme=label_to_theme.get(self._theme_var.get(), "light"),
             ui_scale=self.scale_menu.get(),
             language="es" if self.language_menu.get() == "Español" else "en",
+            auto_check_updates=bool(self._auto_check_switch.get()),
+            check_updates_on_startup=bool(self._check_on_startup_switch.get()),
+            update_channel=channel_label_to_value.get(self._update_channel_var.get(), "estable"),
+            update_frequency=frequency_label_to_value.get(self._update_frequency_menu.get(), "diaria"),
         )

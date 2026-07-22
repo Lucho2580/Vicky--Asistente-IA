@@ -27,6 +27,42 @@ jobs:
       - name: Descargar el código
         uses: actions/checkout@v4
 
+      - name: Determinar versión (desde el tag de git) y build (run_number)
+        # Única fuente de verdad de la versión: se toma del propio tag
+        # que disparó este build (ej. "v1.3.2" -> "1.3.2") y del contador
+        # de builds de Actions, y se sobrescribe core/version.py con
+        # esos valores — nunca se edita ese archivo a mano.
+        shell: pwsh
+        run: |
+          $tagName = "${{ github.ref_name }}"
+          if ($tagName -match '^v?(\d+\.\d+\.\d+)$') {
+            $version = $matches[1]
+          } else {
+            # Se ejecutó manualmente (sin tag "vX.Y.Z"): build de desarrollo.
+            $version = "0.0.0"
+          }
+          $build = "${{ github.run_number }}"
+          $buildDate = Get-Date -Format "yyyy-MM-dd"
+
+          $lines = @(
+            '"""',
+            'Única fuente de verdad de la versión de la aplicación.',
+            '',
+            'GENERADO AUTOMÁTICAMENTE por .github/workflows/build-msi.yml en',
+            'cada build — NO editar a mano, se sobrescribe en el próximo tag.',
+            '"""',
+            "APP_VERSION = ""$version""",
+            "APP_BUILD = $build",
+            "BUILD_DATE = ""$buildDate"""
+          )
+          Set-Content -Path "core\version.py" -Value $lines -Encoding utf8
+
+          Write-Host "Version embebida: $version (build $build, fecha $buildDate)"
+
+          # Para el paso de candle.exe (versión del propio .msi, 4 partes numéricas)
+          $msiBuildPart = [int]$build % 65535
+          echo "PRODUCT_VERSION=$version.$msiBuildPart" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
@@ -39,6 +75,27 @@ jobs:
 
       - name: Generar ejecutable con PyInstaller
         run: pyinstaller --noconfirm --clean packaging/pyinstaller/app.spec
+
+      - name: Escribir .env con las credenciales (desde GitHub Secrets)
+        # Genera el .env DENTRO de dist/AsistenteIA (junto al .exe), para
+        # que heat.exe lo incluya como un archivo más al armar el .msi.
+        # Los valores nunca aparecen en los logs de Actions: se mapean a
+        # variables de entorno del paso (no se interpolan directamente
+        # en el script), que es la práctica recomendada por GitHub.
+        env:
+          ASISTENTEIA_MS_CLIENT_ID: ${{ secrets.ASISTENTEIA_MS_CLIENT_ID }}
+          ASISTENTEIA_MS_TENANT_ID: ${{ secrets.ASISTENTEIA_MS_TENANT_ID }}
+          ASISTENTEIA_AI_ENDPOINT: ${{ secrets.ASISTENTEIA_AI_ENDPOINT }}
+          ASISTENTEIA_AI_API_KEY: ${{ secrets.ASISTENTEIA_AI_API_KEY }}
+        run: |
+          $lines = @(
+            "ASISTENTEIA_MS_CLIENT_ID=$env:ASISTENTEIA_MS_CLIENT_ID",
+            "ASISTENTEIA_MS_TENANT_ID=$env:ASISTENTEIA_MS_TENANT_ID",
+            "ASISTENTEIA_AI_ENDPOINT=$env:ASISTENTEIA_AI_ENDPOINT",
+            "ASISTENTEIA_AI_API_KEY=$env:ASISTENTEIA_AI_API_KEY"
+          )
+          Set-Content -Path "dist\AsistenteIA\.env" -Value $lines -Encoding utf8
+        shell: pwsh
 
       - name: Instalar WiX Toolset
         run: choco install wixtoolset -y
@@ -53,10 +110,10 @@ jobs:
         run: heat.exe dir dist\AsistenteIA -o packaging\wix\Files.wxs -ag -srd -cg AppFiles -dr INSTALLFOLDER -var var.SourceDir
 
       - name: Compilar con candle.exe
-        run: candle.exe -dSourceDir=dist\AsistenteIA -out packaging\wix\obj\ packaging\wix\Product.wxs packaging\wix\Files.wxs
+        run: candle.exe -dSourceDir=dist\AsistenteIA -dProductVersion=${{ env.PRODUCT_VERSION }} -out packaging\wix\obj\ packaging\wix\Product.wxs packaging\wix\Files.wxs
 
       - name: Enlazar con light.exe (genera el .msi)
-        run: light.exe -ext WixUIExtension -sval -out dist\AsistenteIA-Setup.msi packaging\wix\obj\Product.wixobj packaging\wix\obj\Files.wixobj
+        run: light.exe -ext WixUIExtension -ext WixUtilExtension -sval -out dist\AsistenteIA-Setup.msi packaging\wix\obj\Product.wixobj packaging\wix\obj\Files.wixobj
 
       - name: Publicar el instalador como artifact descargable
         uses: actions/upload-artifact@v4

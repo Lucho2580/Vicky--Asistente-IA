@@ -1,25 +1,23 @@
 """
 Punto de entrada de Asistente IA - La Vianda (versión CustomTkinter).
 
-Antes de mostrar la app, se muestra una pantalla de login (con
-Microsoft, si está configurado; ver core/microsoft_auth.py). El
-nombre real de la persona logueada se usa después en el saludo del
-Home ("Buenos días, Carlos 👋") en vez del usuario de Windows.
+Se crea UNA SOLA vez la ventana principal (`MainWindow`), que primero
+muestra el login (con Microsoft, si está configurado) como un overlay
+dentro de sí misma, y luego construye el resto de la interfaz —
+nunca se crean dos ventanas raíz de Tkinter separadas (eso es lo que
+causaba errores reales tipo "invalid command name ... check_dpi_scaling",
+un problema conocido de customtkinter al destruir una raíz y crear
+otra en el mismo proceso).
 
 Se mantiene mínimo a propósito: toda la lógica vive en los paquetes
 ui/, ai/, database/, models/ y config/.
 """
-from ui.login_window import LoginWindow
 from ui.main_window import MainWindow
 
 
 def main() -> None:
-    def launch_main_window(display_name: str | None) -> None:
-        app = MainWindow(display_name=display_name)
-        app.mainloop()
-
-    login = LoginWindow(on_complete=launch_main_window)
-    login.mainloop()
+    app = MainWindow()  # sin display_name: muestra el login dentro de la misma ventana
+    app.mainloop()
 
 
 if __name__ == "__main__":

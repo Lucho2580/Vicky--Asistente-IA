@@ -5,13 +5,16 @@ import customtkinter as ctk
 
 from ai.copilot import GitHubCopilotProvider
 from config.app_config import AppConfig
+from core.app_logger import get_logger
 from core.greeting import build_greeting
+from core.version import APP_BUILD, APP_VERSION, BUILD_DATE
 from database.knowledge_store import KnowledgeStore
 from models.message import Message, Sender
 from services.connection_log_service import ConnectionLogService
 from services.conversation_service import ConversationService
 from services.knowledge_base import KnowledgeBase, UnsupportedFileTypeError, friendly_name
 from services.qa_log_service import QALogService
+from services.update_manager import UpdateManager
 from ui import theme
 from ui.about_page import AboutPage
 from ui.chat_panel import ChatPanel, HistoryPanel
@@ -19,6 +22,7 @@ from ui.help_page import HelpPage
 from ui.settings_window import SettingsPage
 from ui.sidebar import Sidebar
 from ui.status_bar import StatusBar
+from ui.update_dialog import UpdateDialog
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -116,6 +120,15 @@ class MainWindow(ctk.CTk):
         # app) queda indexado desde el primer momento.
         self._knowledge_base.sync_training_folder()
 
+        settings = self._config.settings
+        self._update_manager = UpdateManager(
+            source=settings.update_source,
+            endpoint_url=settings.update_endpoint,
+            github_repo=settings.update_github_repo,
+            channel=settings.update_channel,
+        )
+        self._update_dialog = None
+
         self._active_conversation_id: int | None = None
         self._current_view = "home"
         self._active_provider = None
@@ -123,8 +136,30 @@ class MainWindow(ctk.CTk):
         self._stop_requested = False
         self._current_stream_state: dict | None = None
 
+        if self._display_name is None:
+            # Sin nombre todavía: mostrar el login como un overlay DENTRO
+            # de esta misma ventana (nunca una segunda raíz de Tkinter —
+            # ver ui/login_window.py para el motivo exacto). El resto de
+            # la interfaz recién se construye cuando el login termina.
+            self._show_login_overlay()
+        else:
+            # Ya se pasó un nombre (ej. pruebas, o si en el futuro se
+            # reutiliza la ventana tras un logout): se salta el login.
+            self._build_layout()
+            self._apply_initial_state()
+            self._maybe_check_for_updates_on_startup()
+
+    def _show_login_overlay(self) -> None:
+        from ui.login_window import LoginOverlay
+
+        self._login_overlay = LoginOverlay(self, on_complete=self._handle_login_complete)
+        self._login_overlay.pack(fill="both", expand=True)
+
+    def _handle_login_complete(self, display_name: str | None) -> None:
+        self._display_name = display_name
         self._build_layout()
         self._apply_initial_state()
+        self._maybe_check_for_updates_on_startup()
 
     # ------------------------------------------------------------------ #
     # Construcción de la interfaz (sidebar y contenido comienzan en fila 0,
@@ -165,9 +200,14 @@ class MainWindow(ctk.CTk):
             knowledge_base=self._knowledge_base,
             qa_log_service=self._qa_log_service,
             connection_log_service=self._connection_log_service,
+            on_check_updates_now=self.check_for_updates_now,
         )
         self.help_page = HelpPage(self.content_container)
-        self.about_page = AboutPage(self.content_container, display_name=self._display_name)
+        self.about_page = AboutPage(
+            self.content_container,
+            display_name=self._display_name,
+            on_check_updates_now=self.check_for_updates_now,
+        )
 
         self.chat_panel.grid(row=1, column=0, sticky="nsew")
 
@@ -188,6 +228,103 @@ class MainWindow(ctk.CTk):
         # intervalo creciente hasta lograrlo.
         if self._config.ai_credentials_locked:
             self._start_auto_connect_with_retry()
+
+    # ------------------------------------------------------------------ #
+    # Actualizaciones: CheckForUpdates() en segundo plano al iniciar,
+    # respetando la configuración (auto-verificar, buscar al iniciar,
+    # frecuencia) — nunca bloquea la interfaz ni impide usar la app.
+    # ------------------------------------------------------------------ #
+    def _maybe_check_for_updates_on_startup(self) -> None:
+        settings = self._config.settings
+        if not settings.auto_check_updates or not settings.check_updates_on_startup:
+            return
+        if not self._should_check_updates_now(settings.last_update_check, settings.update_frequency):
+            return
+        self.after(1500, self._run_update_check)  # pequeño delay: no compite con el arranque de la UI
+
+    @staticmethod
+    def _should_check_updates_now(last_check_iso: str, frequency: str) -> bool:
+        """Respeta la frecuencia elegida: diaria/semanal/manual (manual = nunca automático)."""
+        if frequency == "manual":
+            return False
+        if not last_check_iso:
+            return True
+
+        from datetime import datetime
+
+        try:
+            last_check = datetime.fromisoformat(last_check_iso)
+        except ValueError:
+            return True
+
+        elapsed = datetime.now() - last_check
+        if frequency == "semanal":
+            return elapsed.days >= 7
+        return elapsed.days >= 1  # "diaria" por defecto
+
+    def _run_update_check(self) -> None:
+        self._update_manager.check_for_updates(self._handle_update_check_result)
+
+    def _handle_update_check_result(self, update_info, error) -> None:
+        # check_for_updates() corre en un hilo aparte: hay que volver al
+        # hilo principal antes de tocar cualquier widget.
+        self.after(0, lambda: self._apply_update_check_result(update_info, error))
+
+    def _apply_update_check_result(self, update_info, error) -> None:
+        from datetime import datetime
+
+        self._config.update(last_update_check=datetime.now().isoformat(timespec="seconds"))
+
+        if error:
+            # Nunca se muestra un error molesto: se registra en logs y
+            # la app sigue funcionando con total normalidad.
+            get_logger().warning("Fallo al verificar actualizaciones: %s", error)
+            return
+
+        if update_info is None:
+            return  # ya está en la última versión: no hacer nada, tal como se pidió
+
+        if self._update_dialog is not None:
+            return  # ya hay un diálogo de actualización abierto
+
+        self._update_dialog = UpdateDialog(
+            self,
+            update_manager=self._update_manager,
+            update_info=update_info,
+            current_version=APP_VERSION,
+            on_remind_later=self._handle_update_remind_later,
+            on_ready_to_install=self._handle_update_ready_to_install,
+        )
+
+    def check_for_updates_now(self) -> None:
+        """Disparado manualmente desde Acerca de / Configuración ("Buscar actualizaciones")."""
+        self._run_update_check()
+
+    def _handle_update_remind_later(self) -> None:
+        self._update_dialog = None
+
+    def _handle_update_ready_to_install(self, installer_path: str) -> None:
+        """
+        La descarga terminó bien: se instala y se cierra la app. El
+        propio instalador reemplaza la versión anterior (MajorUpgrade ya
+        configurado) sin tocar la carpeta de datos de usuario — la
+        configuración, las conversaciones, la Base de Conocimiento y los
+        documentos no se pierden. Si el usuario deja tildada la opción
+        "Iniciar Asistente IA..." en la pantalla final del instalador,
+        la nueva versión se vuelve a abrir sola.
+        """
+        self._update_dialog = None
+        get_logger().info("Instalando actualización descargada en: %s", installer_path)
+        success, error = self._update_manager.install_update(installer_path, silent=False)
+
+        if not success:
+            # No se pudo ni lanzar el instalador (ej. msiexec bloqueado,
+            # permisos): se registra el error y la app sigue funcionando
+            # con normalidad, en vez de cerrarse sin haber logrado nada.
+            get_logger().error("No se pudo iniciar el instalador: %s", error)
+            return
+
+        self.after(500, self.destroy)
 
     # ------------------------------------------------------------------ #
     # Auto-conexión cuando el token/endpoint vienen de variables de entorno
