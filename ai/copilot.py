@@ -13,7 +13,7 @@ el token) como `send_message()` (la conversación real) usan ese mismo
 endpoint con peticiones HTTP reales.
 """
 import json
-from typing import Tuple
+from typing import Callable, Optional, Tuple
 
 from ai.base_provider import CHAT_TIMEOUT_SECONDS, AIProvider
 
@@ -53,7 +53,7 @@ class GitHubCopilotProvider(AIProvider):
         self._connected = False
         return False, self._describe_error(status, error)
 
-    def send_message(self, message: str) -> str:
+    def send_message(self, message: str, system_prompt: Optional[str] = None) -> str:
         if not self.is_connected():
             raise RuntimeError("GitHub Copilot no está conectado. Prueba la conexión en Configuración.")
 
@@ -61,7 +61,7 @@ class GitHubCopilotProvider(AIProvider):
         headers = self._build_headers()
         payload = {
             "model": DEFAULT_MODEL,
-            "messages": [{"role": "user", "content": message}],
+            "messages": self._build_messages(message, system_prompt),
             "max_tokens": 800,
         }
 
@@ -77,9 +77,55 @@ class GitHubCopilotProvider(AIProvider):
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Respuesta inesperada del servidor: {exc}")
 
+    def send_message_stream(
+        self,
+        message: str,
+        on_token: Callable[[str], None],
+        should_stop: Optional[Callable[[], bool]] = None,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        if not self.is_connected():
+            raise RuntimeError("GitHub Copilot no está conectado. Prueba la conexión en Configuración.")
+
+        url = self._resolve_url(self._endpoint)
+        headers = self._build_headers()
+        payload = {
+            "model": DEFAULT_MODEL,
+            "messages": self._build_messages(message, system_prompt),
+            "max_tokens": 800,
+            "stream": True,
+        }
+
+        collected: list[str] = []
+
+        def handle_line(line: str) -> None:
+            delta = self._parse_openai_style_sse_line(line)
+            if delta:
+                collected.append(delta)
+                on_token(delta)
+
+        status, error = self._http_post_stream(
+            url, headers, payload, handle_line, should_stop=should_stop, timeout=CHAT_TIMEOUT_SECONDS
+        )
+
+        if status != 200:
+            self._connected = False
+            raise RuntimeError(self._describe_error(status, error))
+
+        return "".join(collected)
+
     # ------------------------------------------------------------------ #
     # Utilidades internas
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _build_messages(message: str, system_prompt: Optional[str]) -> list[dict]:
+        """Antepone un mensaje 'system' (ej. quién es el usuario) si se indica uno."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": message})
+        return messages
+
     def _build_headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self._api_key}",

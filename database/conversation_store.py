@@ -108,6 +108,11 @@ class ConversationStore:
             id=row["id"], title=row["title"], created_at=row["created_at"], message_count=row["message_count"]
         )
 
+    def delete_conversation(self, conversation_id: int) -> None:
+        """Elimina la conversación; sus mensajes se borran solos (ON DELETE CASCADE)."""
+        self._connection.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        self._connection.commit()
+
     # ------------------------------------------------------------------ #
     # Mensajes
     # ------------------------------------------------------------------ #

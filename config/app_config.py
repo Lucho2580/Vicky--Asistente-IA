@@ -1,15 +1,11 @@
-"""
-Gestor de configuración de la aplicación.
-
-Lee y escribe config/settings.json. Se mantiene deliberadamente simple
-(sin lógica de conexión real todavía) ya que, según el alcance actual,
-solo se necesita persistir las preferencias de interfaz (tema, motor de
-IA seleccionado, datos de conexión a futuro).
-"""
 import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
 
+from core.env_config import (
+    get_ai_api_key_from_env,
+    get_ai_endpoint_from_env,
+    get_ai_engine_from_env,
+)
 from core.paths import SETTINGS_PATH
 
 
@@ -18,7 +14,7 @@ class AppSettings:
     """Modelo de la configuración persistente de la aplicación."""
 
     theme: str = "light"
-    ai_engine: str = "Offline"
+    ai_engine: str = "GitHub Copilot"
     ai_endpoint: str = ""
     ai_api_key: str = ""
     connection_string: str = ""
@@ -46,14 +42,43 @@ class AppConfig:
         if SETTINGS_PATH.exists():
             try:
                 raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-                return AppSettings(**{**asdict(AppSettings()), **raw})
+                settings = AppSettings(**{**asdict(AppSettings()), **raw})
             except (json.JSONDecodeError, TypeError):
-                return AppSettings()
-        return AppSettings()
+                settings = AppSettings()
+        else:
+            settings = AppSettings()
+
+        self._apply_env_overrides(settings)
+        return settings
+
+    @staticmethod
+    def _apply_env_overrides(settings: AppSettings) -> None:
+        """Si hay variables de entorno / .env con el token o la URL, tienen prioridad."""
+        env_endpoint = get_ai_endpoint_from_env()
+        env_api_key = get_ai_api_key_from_env()
+        env_engine = get_ai_engine_from_env()
+
+        if env_endpoint:
+            settings.ai_endpoint = env_endpoint
+        if env_api_key:
+            settings.ai_api_key = env_api_key
+        if env_engine:
+            settings.ai_engine = env_engine
 
     @property
     def settings(self) -> AppSettings:
         return self._settings
+
+    @property
+    def ai_credentials_locked(self) -> bool:
+        """
+        True si el endpoint o la API Key de IA vienen de variables de
+        entorno / .env. En ese caso, la UI de Configuración debe
+        mostrarlos como solo lectura (no tendría sentido dejar
+        editarlos ahí si en el próximo inicio se van a sobreescribir
+        con el valor de la variable de entorno de todos modos).
+        """
+        return bool(get_ai_endpoint_from_env() or get_ai_api_key_from_env())
 
     def save(self) -> None:
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)

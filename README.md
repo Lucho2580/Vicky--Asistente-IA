@@ -37,8 +37,3 @@ core/
     paths.py                          # Rutas compartidas (BD, logs, config)
 main.py
 ```
-
-> Nota de nomenclatura: se mantuvo la carpeta `ui/` (en vez de renombrarla
-> a `views/`) para no romper los imports ya existentes; cumple exactamente
-> el mismo rol. Se agregó `services/` como capa nueva de lógica de negocio,
-> tal como se pidió.

@@ -2,12 +2,12 @@
 Menú lateral de navegación.
 
 Botones habilitados (con acción real de navegación):
-    Inicio, Nuevo Chat, Historial, Configuración
+    Inicio, Nuevo Chat, Historial, Configuración, Ayuda, Acerca de
 
 Botones deshabilitados (funcionalidad futura):
-    Tickets, Ayuda, Acerca de
-    -> se muestran en gris, con el texto "(Próximamente)" y no
-       responden al clic.
+    Tickets
+    -> se muestra en gris, con el texto "(Próximamente)" y no
+       responde al clic.
 
 El botón correspondiente a la vista actualmente seleccionada se
 resalta con el color de acento azul.
@@ -75,8 +75,8 @@ class Sidebar(ctk.CTkFrame):
             ("history", "🕒  Historial", True),
             ("tickets", "🎫  Tickets", False),
             ("settings", "⚙  Configuración", True),
-            ("help", "❓  Ayuda", False),
-            ("about", "ℹ  Acerca de", False),
+            ("help", "❓  Ayuda", True),
+            ("about", "ℹ  Acerca de", True),
         ]
 
         row = 1

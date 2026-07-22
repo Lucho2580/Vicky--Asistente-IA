@@ -1,6 +1,9 @@
 # Interfaz gráfica
 customtkinter>=5.2
 
+# Login con Microsoft (Entra ID / Azure AD), device code flow
+msal>=1.30
+
 # Opcional: si está instalado, la prueba de conexión a SQL Server usa una
 # conexión real; si no está instalado, se hace un fallback automático a una
 # prueba de conectividad de red (socket). La app funciona en ambos casos.

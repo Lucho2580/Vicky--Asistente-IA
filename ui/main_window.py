@@ -1,32 +1,21 @@
-"""
-Ventana principal de la aplicación (segunda iteración de UX).
-
-Cambios clave respecto de la primera versión:
-    - Ya no existe un banner blanco de ancho completo en la parte
-      superior: el sidebar y el panel central comienzan inmediatamente
-      debajo de la barra de título de Windows.
-    - El título / indicador de conexión / motor de IA ahora viven en
-      un encabezado delgado que pertenece únicamente a la columna de
-      contenido (mismo color de fondo que la página, sin separación
-      visual), no en una franja que cruce toda la ventana.
-    - "Configuración" ya no abre una ventana nueva: es una página más
-      dentro del panel principal, exactamente igual que Inicio,
-      Nuevo Chat e Historial.
-    - El historial es real (SQLite) y permite restaurar cualquier
-      conversación anterior sin perder nada.
-"""
 import threading
+from tkinter import filedialog
 
 import customtkinter as ctk
 
 from ai.copilot import GitHubCopilotProvider
-from ai.gemini import GeminiProvider
-from ai.openai import OpenAIProvider
 from config.app_config import AppConfig
+from core.greeting import build_greeting
+from database.knowledge_store import KnowledgeStore
 from models.message import Message, Sender
+from services.connection_log_service import ConnectionLogService
 from services.conversation_service import ConversationService
+from services.knowledge_base import KnowledgeBase, UnsupportedFileTypeError, friendly_name
+from services.qa_log_service import QALogService
 from ui import theme
+from ui.about_page import AboutPage
 from ui.chat_panel import ChatPanel, HistoryPanel
+from ui.help_page import HelpPage
 from ui.settings_window import SettingsPage
 from ui.sidebar import Sidebar
 from ui.status_bar import StatusBar
@@ -40,10 +29,11 @@ CONNECTION_STATES = {
     "connected": "🟢 IA conectada",
 }
 
+# Único motor de IA soportado por ahora: GitHub Copilot. Se conecta solo
+# (ver MainWindow._start_auto_connect_with_retry), sin selector manual.
+AI_ENGINE_NAME = "GitHub Copilot"
 AI_PROVIDERS = {
-    "GitHub Copilot": GitHubCopilotProvider,
-    "OpenAI": OpenAIProvider,
-    "Gemini": GeminiProvider,
+    AI_ENGINE_NAME: GitHubCopilotProvider,
 }
 
 
@@ -54,9 +44,8 @@ class ContentHeader(ctk.CTkFrame):
     se perciba como un banner separado.
     """
 
-    def __init__(self, master, on_engine_change=None, **kwargs):
+    def __init__(self, master, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, height=44, **kwargs)
-        self._on_engine_change = on_engine_change
         self.grid_propagate(False)
         self._build_ui()
 
@@ -76,24 +65,11 @@ class ContentHeader(ctk.CTkFrame):
 
         engine_label = ctk.CTkLabel(
             self,
-            text="Motor IA:",
+            text=f"Motor IA: {AI_ENGINE_NAME}",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
             text_color=theme.TEXT_MUTED,
         )
-        engine_label.grid(row=0, column=2, padx=(0, 6), pady=8)
-
-        self.engine_menu = ctk.CTkOptionMenu(
-            self,
-            values=["GitHub Copilot", "OpenAI", "Gemini", "Offline"],
-            width=140,
-            height=26,
-            fg_color=theme.PRIMARY_BLUE_LIGHT,
-            text_color=theme.PRIMARY_BLUE,
-            button_color=theme.PRIMARY_BLUE,
-            button_hover_color=theme.PRIMARY_BLUE_HOVER,
-            command=self._handle_engine_change,
-        )
-        self.engine_menu.grid(row=0, column=3, padx=(0, 12), pady=8)
+        engine_label.grid(row=0, column=2, padx=(0, 16), pady=8)
 
         self.status_label = ctk.CTkLabel(
             self,
@@ -103,23 +79,20 @@ class ContentHeader(ctk.CTkFrame):
         )
         self.status_label.grid(row=0, column=4, padx=(0, 20), pady=8)
 
-    def _handle_engine_change(self, value: str) -> None:
-        if self._on_engine_change:
-            self._on_engine_change(value)
-
     def set_connection_state(self, state: str) -> None:
         """state: 'disconnected' | 'connecting' | 'connected'"""
         self.status_label.configure(text=CONNECTION_STATES.get(state, CONNECTION_STATES["disconnected"]))
-
-    def set_engine(self, engine_name: str) -> None:
-        self.engine_menu.set(engine_name)
 
 
 class MainWindow(ctk.CTk):
     """Ventana principal de Asistente IA - La Vianda."""
 
-    def __init__(self) -> None:
+    def __init__(self, display_name: str | None = None) -> None:
         super().__init__()
+        # Si viene de un login real (Microsoft), se usa ese nombre; si no,
+        # build_greeting() cae solo al usuario del sistema operativo (getpass),
+        # igual que antes de que existiera el login.
+        self._display_name = display_name
         self.title("Asistente IA - La Vianda")
         self.geometry("1100x720")
         self.minsize(900, 600)
@@ -128,11 +101,27 @@ class MainWindow(ctk.CTk):
         ctk.set_appearance_mode("dark" if self._config.settings.theme == "dark" else "light")
 
         self._conversation_service = ConversationService()
+
+        # Base de Conocimiento (archivos de entrenamiento), historial de
+        # conexiones y registro centralizado de preguntas/respuestas.
+        # Comparten un mismo archivo knowledge.db (una conexión sqlite por
+        # servicio; sqlite soporta múltiples conexiones al mismo archivo).
+        knowledge_store = KnowledgeStore()
+        self._knowledge_base = KnowledgeBase(knowledge_store)
+        self._qa_log_service = QALogService(knowledge_store)
+        self._connection_log_service = ConnectionLogService(knowledge_store)
+
+        # Sincroniza la carpeta "Training": cualquier archivo que el
+        # usuario ya haya colocado ahí (sin subirlo manualmente desde la
+        # app) queda indexado desde el primer momento.
+        self._knowledge_base.sync_training_folder()
+
         self._active_conversation_id: int | None = None
         self._current_view = "home"
         self._active_provider = None
         self._generating_job = None
         self._stop_requested = False
+        self._current_stream_state: dict | None = None
 
         self._build_layout()
         self._apply_initial_state()
@@ -153,7 +142,7 @@ class MainWindow(ctk.CTk):
         self.content_container.grid_rowconfigure(1, weight=1)
         self.content_container.grid_columnconfigure(0, weight=1)
 
-        self.content_header = ContentHeader(self.content_container, on_engine_change=self._handle_engine_change)
+        self.content_header = ContentHeader(self.content_container)
         self.content_header.grid(row=0, column=0, sticky="ew")
 
         # Páginas apiladas en la misma celda (row=1); se muestra una a la vez.
@@ -161,16 +150,24 @@ class MainWindow(ctk.CTk):
             self.content_container,
             on_send_message=self._handle_user_message,
             on_stop_generation=self._handle_stop_generation,
+            on_attach_file=self._handle_attach_file,
+            on_regenerate_message=self._handle_regenerate_message,
         )
         self.history_panel = HistoryPanel(
-            self.content_container, on_select_conversation=self._handle_open_conversation
+            self.content_container,
+            on_select_conversation=self._handle_open_conversation,
+            on_delete_conversation=self._handle_delete_conversation,
         )
         self.settings_page = SettingsPage(
             self.content_container,
             on_theme_change=self._apply_theme,
-            on_ai_connection_change=self._handle_ai_connection_result,
             on_db_connection_change=self._handle_db_connection_result,
+            knowledge_base=self._knowledge_base,
+            qa_log_service=self._qa_log_service,
+            connection_log_service=self._connection_log_service,
         )
+        self.help_page = HelpPage(self.content_container)
+        self.about_page = AboutPage(self.content_container, display_name=self._display_name)
 
         self.chat_panel.grid(row=1, column=0, sticky="nsew")
 
@@ -179,13 +176,69 @@ class MainWindow(ctk.CTk):
 
     def _apply_initial_state(self) -> None:
         self.sidebar.select("home")
-        self.content_header.set_engine(self._config.settings.ai_engine)
+        self.chat_panel.show_home(build_greeting(self._display_name))
         self.content_header.set_connection_state("disconnected")
         self.status_bar.set_ai_status(False)
         self.status_bar.set_db_status(False)
         self.status_bar.set_user("Administrador")
 
+        # Si el token/endpoint de IA vienen de variables de entorno (o
+        # .env), no tiene sentido esperar a que el usuario presione
+        # "Probar conexión": se conecta sola, reintentando con un
+        # intervalo creciente hasta lograrlo.
+        if self._config.ai_credentials_locked:
+            self._start_auto_connect_with_retry()
+
     # ------------------------------------------------------------------ #
+    # Auto-conexión cuando el token/endpoint vienen de variables de entorno
+    # ------------------------------------------------------------------ #
+    AUTO_CONNECT_INITIAL_DELAY_SECONDS = 10
+    AUTO_CONNECT_DELAY_INCREMENT_SECONDS = 5
+
+    def _start_auto_connect_with_retry(self) -> None:
+        provider_cls = AI_PROVIDERS[AI_ENGINE_NAME]
+        self.content_header.set_connection_state("connecting")
+        self._auto_connect_attempt(AI_ENGINE_NAME, provider_cls, next_delay=self.AUTO_CONNECT_INITIAL_DELAY_SECONDS)
+
+    def _auto_connect_attempt(self, engine_name: str, provider_cls, next_delay: int) -> None:
+        if not self.winfo_exists():
+            return  # la ventana ya se cerró: no seguir reintentando
+
+        settings = self._config.settings
+
+        def worker() -> None:
+            provider = provider_cls()
+            connected, message = provider.connect(endpoint=settings.ai_endpoint, api_key=settings.ai_api_key)
+            self.after(
+                0,
+                lambda: self._handle_auto_connect_result(engine_name, provider_cls, provider, connected, message, next_delay),
+            )
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_auto_connect_result(
+        self, engine_name: str, provider_cls, provider, connected: bool, message: str, next_delay: int
+    ) -> None:
+        if not self.winfo_exists():
+            return
+
+        self._connection_log_service.log_ai_attempt(engine_name, connected, message)
+
+        if connected:
+            self._active_provider = provider
+            self.content_header.set_connection_state("connected")
+            self.status_bar.set_ai_status(True, engine_name)
+            return
+
+        # Sigue sin conectar: se reintenta en `next_delay` segundos, y el
+        # siguiente intento esperará `next_delay + 5` segundos, y así
+        # sucesivamente, hasta lograr conectar.
+        self.content_header.set_connection_state("disconnected")
+        self.status_bar.set_ai_status(False, engine_name)
+        self.after(
+            next_delay * 1000,
+            lambda: self._auto_connect_attempt(engine_name, provider_cls, next_delay + self.AUTO_CONNECT_DELAY_INCREMENT_SECONDS),
+        )
     # Navegación por páginas (todo dentro del mismo Frame principal,
     # nunca se abre una ventana nueva)
     # ------------------------------------------------------------------ #
@@ -193,6 +246,8 @@ class MainWindow(ctk.CTk):
         self.chat_panel.grid_forget()
         self.history_panel.grid_forget()
         self.settings_page.grid_forget()
+        self.help_page.grid_forget()
+        self.about_page.grid_forget()
 
     def _handle_navigate(self, key: str) -> None:
         # Si el usuario estaba en Configuración y navega a otra página,
@@ -203,16 +258,14 @@ class MainWindow(ctk.CTk):
         self._current_view = key
         self._hide_all_pages()
 
-        if key == "home":
-            self.chat_panel.grid(row=1, column=0, sticky="nsew")
-            self.chat_panel.show_welcome()
+        if key in ("home", "new_chat"):
+            # Home = Chat: ambos muestran el mismo saludo y quedan listos
+            # para escribir de inmediato. La conversación se crea recién
+            # al primer mensaje (creación perezosa, evita conversaciones
+            # vacías en el Historial).
             self._active_conversation_id = None
-
-        elif key == "new_chat":
-            conversation = self._conversation_service.start_new_conversation()
-            self._active_conversation_id = conversation.id
             self.chat_panel.grid(row=1, column=0, sticky="nsew")
-            self.chat_panel.start_new_conversation()
+            self.chat_panel.show_home(build_greeting(self._display_name))
 
         elif key == "history":
             self.history_panel.grid(row=1, column=0, sticky="nsew")
@@ -221,6 +274,23 @@ class MainWindow(ctk.CTk):
 
         elif key == "settings":
             self.settings_page.grid(row=1, column=0, sticky="nsew")
+
+        elif key == "help":
+            self.help_page.grid(row=1, column=0, sticky="nsew")
+
+        elif key == "about":
+            self.about_page.grid(row=1, column=0, sticky="nsew")
+
+    def _handle_delete_conversation(self, conversation_id: int) -> None:
+        """Elimina una conversación de forma permanente y refresca el Historial."""
+        self._conversation_service.delete_conversation(conversation_id)
+
+        if self._active_conversation_id == conversation_id:
+            # Se borró la conversación que estaba abierta: volver al Home.
+            self._active_conversation_id = None
+
+        grouped = self._conversation_service.list_grouped_conversations()
+        self.history_panel.refresh(grouped)
 
     def _handle_open_conversation(self, conversation_id: int) -> None:
         """Restaura una conversación existente (NO crea una nueva)."""
@@ -234,59 +304,49 @@ class MainWindow(ctk.CTk):
         self.sidebar.select("history")
 
     # ------------------------------------------------------------------ #
+    # Adjuntar archivo (sube el documento a la Base de Conocimiento, con
+    # persistencia real en knowledge.db, para usarlo luego como contexto)
+    # ------------------------------------------------------------------ #
+    def _handle_attach_file(self) -> None:
+        file_path = filedialog.askopenfilename(
+            title="Adjuntar archivo de entrenamiento",
+            filetypes=[
+                ("Archivos de texto", "*.txt *.md *.csv *.json *.log"),
+                ("Todos los archivos", "*.*"),
+            ],
+        )
+        if not file_path:
+            return  # el usuario canceló el diálogo
+
+        if self._active_conversation_id is None:
+            conversation = self._conversation_service.start_new_conversation()
+            self._active_conversation_id = conversation.id
+            self.chat_panel.start_new_conversation()
+
+        try:
+            training_file = self._knowledge_base.add_document(file_path)
+            confirmation_text = (
+                f"📎 Archivo «{training_file.filename}» agregado a la Base de Conocimiento "
+                f"({training_file.size_bytes} bytes). Se usará como contexto en próximas preguntas."
+            )
+        except UnsupportedFileTypeError as exc:
+            confirmation_text = f"⚠️ No se pudo adjuntar el archivo: {exc}"
+        except Exception as exc:  # noqa: BLE001 - cualquier error de lectura se informa, no se cae la app
+            confirmation_text = f"⚠️ No se pudo adjuntar el archivo: {exc}"
+
+        message = self._conversation_service.add_assistant_message(
+            self._active_conversation_id, confirmation_text
+        )
+        self.chat_panel.add_message(message)
+
+    # ------------------------------------------------------------------ #
     # Tema
     # ------------------------------------------------------------------ #
     def _apply_theme(self, theme_mode: str) -> None:
         ctk.set_appearance_mode(theme_mode)
 
-    # ------------------------------------------------------------------ #
-    # Motor de IA (indicador dinámico de conexión)
-    # ------------------------------------------------------------------ #
-    def _handle_engine_change(self, engine_name: str) -> None:
-        self.content_header.set_engine(engine_name)
-        self._config.update(ai_engine=engine_name)
-
-        if engine_name == "Offline":
-            self.set_connection_state("disconnected")
-            self.status_bar.set_ai_status(False)
-            return
-
-        provider_cls = AI_PROVIDERS.get(engine_name)
-        self.set_connection_state("connecting")
-
-        def finish_connection_attempt():
-            connected = False
-            if provider_cls is not None:
-                self._active_provider = provider_cls()
-                settings = self._config.settings
-                connected, _message = self._active_provider.connect(
-                    endpoint=settings.ai_endpoint, api_key=settings.ai_api_key
-                )
-            # Sin credenciales válidas o sin red, la conexión no se completa.
-            self.set_connection_state("connected" if connected else "disconnected")
-            self.status_bar.set_ai_status(connected, engine_name)
-
-        self.after(700, finish_connection_attempt)
-
-    def set_connection_state(self, state: str) -> None:
-        """Permite cambiar el indicador de conexión dinámicamente desde el código."""
-        self.content_header.set_connection_state(state)
-
-    def _handle_ai_connection_result(self, engine_name: str, connected: bool, provider) -> None:
-        """
-        Se llama desde la tarjeta de IA en Configuración cuando el usuario
-        presiona "Probar conexión". Antes este resultado se quedaba solo
-        en esa tarjeta; ahora también actualiza el encabezado y la barra
-        de estado, y deja el proveedor listo para usarse en el chat.
-        """
-        self._active_provider = provider  # None si no se pudo conectar
-        self._config.update(ai_engine=engine_name)
-        self.content_header.set_engine(engine_name)
-        self.content_header.set_connection_state("connected" if connected else "disconnected")
-        self.status_bar.set_ai_status(connected, engine_name)
-
     def _handle_db_connection_result(self, connected: bool, message: str) -> None:
-        """Igual que arriba, pero para la tarjeta de Base de Datos."""
+        """Se llama desde la tarjeta de Base de Datos en Configuración."""
         self.status_bar.set_db_status(connected, "SQL Server")
 
     # ------------------------------------------------------------------ #
@@ -302,37 +362,176 @@ class MainWindow(ctk.CTk):
 
         message = self._conversation_service.add_user_message(self._active_conversation_id, text)
         self.chat_panel.add_message(message)
+
+        self._stop_requested = False
+        self._dispatch_ai_response(text)
+
+    def _handle_regenerate_message(self, question: str) -> None:
+        """
+        Vuelve a pedir una respuesta para `question` (la pregunta que
+        precedía a la burbuja donde se apretó "↻ Regenerar"), sin
+        agregar un nuevo mensaje de usuario — el usuario ya la escribió
+        antes; solo se agrega una nueva respuesta debajo.
+        """
+        if self._active_conversation_id is None:
+            return
+        self._stop_requested = False
+        self._dispatch_ai_response(question)
+
+    def _dispatch_ai_response(self, question: str) -> None:
+        """
+        Lógica compartida entre un mensaje nuevo y un "Regenerar": busca
+        contexto en la Base de Conocimiento, detecta ambigüedad, y llama
+        al proveedor real (streaming) o al camino sin conexión.
+        """
+        # Antes de generar/consultar la IA: si la pregunta es ambigua entre
+        # dos o más procedimientos de la Base de Conocimiento (ej. "cambiar
+        # la contraseña" podría ser la del correo o la de Zeus), se pregunta
+        # primero a cuál se refiere, en vez de mezclar el contexto de
+        # documentos que no tienen que ver entre sí.
+        scored_matches = self._knowledge_base.search_with_scores(question)
+        if scored_matches:
+            top_score = scored_matches[0][0]
+            threshold = top_score * 0.85
+            candidates = [doc for score, doc in scored_matches if score >= threshold]
+        else:
+            candidates = []
+
+        if len(candidates) >= 2:
+            self._ask_clarification(candidates)
+            return
+
         self.chat_panel.set_generating(True)
         self.chat_panel.show_typing_indicator()
 
-        self._stop_requested = False
+        matches = candidates
+        source_filenames = ", ".join(m.filename for m in matches)
+        context = self._knowledge_base.build_context_snippet(matches)
+        augmented_text = (
+            f"Usa el siguiente contexto de los archivos de entrenamiento si es relevante:\n"
+            f"{context}\n\nPregunta del usuario: {question}"
+            if context
+            else question
+        )
 
         if self._active_provider is not None and self._active_provider.is_connected():
-            self._start_real_ai_response(text)
+            self._start_real_ai_response(question, augmented_text, source_filenames)
         else:
             # Sin proveedor conectado (Offline o conexión fallida): se explica
             # la situación en vez de fingir una respuesta.
-            self._generating_job = self.after(900, lambda: self._finish_ai_response_placeholder(text))
+            self._generating_job = self.after(
+                900, lambda: self._finish_ai_response_placeholder(question, source_filenames)
+            )
 
-    def _start_real_ai_response(self, text: str) -> None:
-        """Llama al proveedor real en un hilo aparte para no congelar la interfaz."""
+    def _ask_clarification(self, tied_documents) -> None:
+        """
+        Muestra una pregunta de aclaración cuando dos o más procedimientos
+        de la Base de Conocimiento empatan en relevancia. No se llama a
+        la IA ni se registra en el historial de Q&A: es solo una
+        aclaración; la respuesta real del usuario (ej. "Zeus") dispara
+        una nueva búsqueda que, al ser más específica, ya no será ambigua.
+        """
+        options = [friendly_name(doc.filename) for doc in tied_documents]
+        options_text = " o ".join(f"«{opt}»" for opt in options)
+        clarification_text = (
+            f"Encontré más de un procedimiento que podría aplicar: {options_text}. "
+            f"¿Me confirmas a cuál te refieres? (por ejemplo, escribe el nombre del sistema)"
+        )
+        message = self._conversation_service.add_assistant_message(
+            self._active_conversation_id, clarification_text
+        )
+        self.chat_panel.add_message(message)
+
+    def _build_system_prompt(self) -> str:
+        """
+        Contexto fijo que se manda como mensaje de rol "system" en cada
+        pregunta: quién es el usuario logueado (vía Microsoft). Sin
+        esto, el modelo no tiene ninguna forma de saber quién le habla
+        y responde cosas como "no tengo acceso a información personal"
+        ante preguntas tan simples como "¿cómo me llamo?".
+        """
+        if self._display_name:
+            return (
+                f"Eres el Asistente IA de La Vianda. La persona que te está escribiendo "
+                f"ya inició sesión en la aplicación con su cuenta de Microsoft y se llama "
+                f"{self._display_name}. Si te pregunta su propio nombre, respondé con ese "
+                f"nombre directamente — no digas que no tenés acceso a información personal, "
+                f"porque esa información ya te la dieron acá."
+            )
+        return (
+            "Eres el Asistente IA de La Vianda. No se pudo identificar el nombre de la "
+            "persona que te está escribiendo en esta sesión. Si te pregunta su nombre, "
+            "indicá amablemente que no lo tenés disponible en este momento."
+        )
+
+    def _start_real_ai_response(self, original_text: str, augmented_text: str, source_filenames: str) -> None:
+        """
+        Llama al proveedor real en un hilo aparte para no congelar la
+        interfaz, usando streaming: el texto va apareciendo fragmento a
+        fragmento en la burbuja a medida que llega, en vez de esperar la
+        respuesta completa (como ChatGPT). Si el proveedor no soporta
+        streaming real, `send_message_stream` degrada solo y entrega
+        todo el texto de una vez (ver ai/base_provider.py).
+        """
         provider = self._active_provider
         conversation_id = self._active_conversation_id
+        engine_name = provider.name
+        system_prompt = self._build_system_prompt()
+
+        # Se crea perezosamente recién cuando llega el primer fragmento
+        # (mientras tanto se sigue viendo el indicador "Pensando...").
+        bubble_holder: dict = {}
+        accumulated_holder = {"text": ""}
+        self._current_stream_state = {
+            "bubble_holder": bubble_holder,
+            "accumulated": accumulated_holder,
+            "conversation_id": conversation_id,
+        }
+
+        def on_token(delta: str) -> None:
+            accumulated_holder["text"] += delta
+
+            def apply_on_ui_thread() -> None:
+                if self._stop_requested or conversation_id != self._active_conversation_id:
+                    return
+                if "bubble" not in bubble_holder:
+                    self.chat_panel.hide_typing_indicator()
+                    bubble_holder["bubble"] = self.chat_panel.start_streaming_assistant_bubble()
+                self.chat_panel.append_to_streaming_bubble(bubble_holder["bubble"], delta)
+
+            # on_token se llama desde el hilo de red: los widgets de Tk
+            # solo deben tocarse desde el hilo principal.
+            self.after(0, apply_on_ui_thread)
 
         def worker() -> None:
             try:
-                reply_text = provider.send_message(text)
+                final_text = provider.send_message_stream(
+                    augmented_text, on_token, should_stop=lambda: self._stop_requested, system_prompt=system_prompt
+                )
                 error_text = None
             except Exception as exc:  # noqa: BLE001 - cualquier fallo de red/API se muestra al usuario
-                reply_text = None
+                final_text = None
                 error_text = str(exc)
 
-            # Los widgets de Tk solo deben tocarse desde el hilo principal.
-            self.after(0, lambda: self._finish_ai_response_real(conversation_id, reply_text, error_text))
+            self.after(
+                0,
+                lambda: self._finish_ai_response_real(
+                    conversation_id, original_text, source_filenames, final_text, error_text, bubble_holder.get("bubble"), engine_name
+                ),
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_ai_response_real(self, conversation_id: int, reply_text: str | None, error_text: str | None) -> None:
+    def _finish_ai_response_real(
+        self,
+        conversation_id: int,
+        original_text: str,
+        source_filenames: str,
+        reply_text: str | None,
+        error_text: str | None,
+        streaming_bubble,
+        engine_name: str,
+    ) -> None:
         if self._stop_requested or conversation_id != self._active_conversation_id:
             # El usuario pidió detener, o ya cambió de conversación mientras
             # se esperaba la respuesta: no se muestra un mensaje fuera de lugar.
@@ -340,18 +539,33 @@ class MainWindow(ctk.CTk):
 
         self.chat_panel.hide_typing_indicator()
         self.chat_panel.set_generating(False)
+        self._current_stream_state = None
 
         if error_text:
-            reply_text = f"⚠️ No se pudo obtener respuesta de {self._active_provider.name}: {error_text}"
+            reply_text = f"⚠️ No se pudo obtener respuesta de {engine_name}: {error_text}"
             # Si el proveedor falló (token vencido, sin red, etc.), reflejarlo
             # también en el encabezado y la barra de estado.
             self.content_header.set_connection_state("disconnected")
-            self.status_bar.set_ai_status(False, self._active_provider.name)
+            self.status_bar.set_ai_status(False, engine_name)
+        elif reply_text is None:
+            reply_text = ""  # defensivo: no debería ocurrir sin error_text
 
         message = self._conversation_service.add_assistant_message(conversation_id, reply_text)
-        self.chat_panel.add_message(message)
 
-    def _finish_ai_response_placeholder(self, original_text: str) -> None:
+        if streaming_bubble is not None:
+            # Ya había una burbuja creciendo con el streaming: se reemplaza
+            # el texto plano por el renderizado final en Markdown.
+            self.chat_panel.finalize_streaming_bubble(streaming_bubble, message)
+        else:
+            # No llegó a crearse (ej. falló antes de recibir ni un token):
+            # se agrega la burbuja (de error) directamente.
+            self.chat_panel.add_message(message)
+
+        # Centraliza la pregunta y la respuesta para poder consultarlas con
+        # el tiempo, junto con qué archivos de entrenamiento se usaron.
+        self._qa_log_service.log(original_text, reply_text, engine_name, source_filenames)
+
+    def _finish_ai_response_placeholder(self, original_text: str, source_filenames: str = "") -> None:
         """Respuesta simulada, solo quando no hay ningún proveedor de IA conectado."""
         self.chat_panel.hide_typing_indicator()
         self.chat_panel.set_generating(False)
@@ -365,6 +579,7 @@ class MainWindow(ctk.CTk):
         )
         message = self._conversation_service.add_assistant_message(self._active_conversation_id, reply_text)
         self.chat_panel.add_message(message)
+        self._qa_log_service.log(original_text, reply_text, "Offline", source_filenames)
 
     def _handle_stop_generation(self) -> None:
         self._stop_requested = True
@@ -373,6 +588,21 @@ class MainWindow(ctk.CTk):
             self._generating_job = None
         self.chat_panel.hide_typing_indicator()
         self.chat_panel.set_generating(False)
+
+        # Si ya había una respuesta en streaming a mitad de camino, se
+        # conserva el texto parcial recibido hasta ahora (marcado como
+        # interrumpido) en vez de perderlo o dejarlo en un estado a medio
+        # renderizar sin botones de Copiar/Regenerar.
+        state = self._current_stream_state
+        self._current_stream_state = None
+
+        if state is not None and state["bubble_holder"].get("bubble") is not None:
+            bubble = state["bubble_holder"]["bubble"]
+            partial_text = state["accumulated"]["text"].strip()
+            final_text = f"{partial_text}\n\n*(Respuesta interrumpida por el usuario)*" if partial_text else "(Generación detenida por el usuario)"
+            message = self._conversation_service.add_assistant_message(state["conversation_id"], final_text)
+            self.chat_panel.finalize_streaming_bubble(bubble, message)
+            return
 
         stop_message = self._conversation_service.add_assistant_message(
             self._active_conversation_id, "(Generación detenida por el usuario)"

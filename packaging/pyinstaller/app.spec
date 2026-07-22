@@ -28,10 +28,10 @@ APP_NAME = "AsistenteIA"
 
 # customtkinter necesita sus assets (temas, fuentes) empaquetados como datos.
 datas = collect_data_files("customtkinter")
-
-# Plantilla de configuración por defecto, para que el instalador la
-# incluya (el usuario final no tiene por qué escribir settings.json a mano).
-datas += [(os.path.join(PROJECT_ROOT, "config", "settings.json"), "config")]
+# Nota: NO se empaqueta config/settings.json aquí a propósito. La app
+# genera su propia configuración y base de datos en la carpeta de datos
+# de usuario (ver core/paths.py) la primera vez que se ejecuta, nunca
+# dentro de la carpeta de instalación.
 
 block_cipher = None
 
