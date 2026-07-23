@@ -1,15 +1,14 @@
-"""
-Gestor de configuración de la aplicación.
-
-Lee y escribe config/settings.json. Se mantiene deliberadamente simple
-(sin lógica de conexión real todavía) ya que, según el alcance actual,
-solo se necesita persistir las preferencias de interfaz (tema, motor de
-IA seleccionado, datos de conexión a futuro).
-"""
 import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
 
+from core.env_config import (
+    get_ai_api_key_from_env,
+    get_ai_endpoint_from_env,
+    get_ai_engine_from_env,
+    get_update_endpoint_from_env,
+    get_update_github_repo_from_env,
+    get_update_source_from_env,
+)
 from core.paths import SETTINGS_PATH
 
 
@@ -18,7 +17,7 @@ class AppSettings:
     """Modelo de la configuración persistente de la aplicación."""
 
     theme: str = "light"
-    ai_engine: str = "Offline"
+    ai_engine: str = "GitHub Copilot"
     ai_endpoint: str = ""
     ai_api_key: str = ""
     connection_string: str = ""
@@ -29,6 +28,17 @@ class AppSettings:
     language: str = "es"
     ui_scale: str = "100%"
     version: int = 1
+
+    # --- Actualizaciones ---
+    auto_check_updates: bool = True
+    check_updates_on_startup: bool = True
+    update_channel: str = "estable"       # "estable" | "beta"
+    update_frequency: str = "diaria"       # "diaria" | "semanal" | "manual"
+    update_source: str = "custom"           # "custom" (endpoint propio) | "github"
+    update_endpoint: str = ""                # URL del endpoint propio (source="custom")
+    update_github_repo: str = ""              # "usuario/repositorio" (source="github")
+    last_update_check: str = ""                # ISO 8601 del último chequeo realizado
+    silent_updates_enabled: bool = False        # preparado, deshabilitado por defecto
 
 
 class AppConfig:
@@ -46,14 +56,54 @@ class AppConfig:
         if SETTINGS_PATH.exists():
             try:
                 raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-                return AppSettings(**{**asdict(AppSettings()), **raw})
+                settings = AppSettings(**{**asdict(AppSettings()), **raw})
             except (json.JSONDecodeError, TypeError):
-                return AppSettings()
-        return AppSettings()
+                settings = AppSettings()
+        else:
+            settings = AppSettings()
+
+        self._apply_env_overrides(settings)
+        return settings
+
+    @staticmethod
+    def _apply_env_overrides(settings: AppSettings) -> None:
+        """Si hay variables de entorno / .env con el token o la URL, tienen prioridad."""
+        env_endpoint = get_ai_endpoint_from_env()
+        env_api_key = get_ai_api_key_from_env()
+        env_engine = get_ai_engine_from_env()
+
+        if env_endpoint:
+            settings.ai_endpoint = env_endpoint
+        if env_api_key:
+            settings.ai_api_key = env_api_key
+        if env_engine:
+            settings.ai_engine = env_engine
+
+        env_update_source = get_update_source_from_env()
+        env_update_endpoint = get_update_endpoint_from_env()
+        env_update_github_repo = get_update_github_repo_from_env()
+
+        if env_update_source:
+            settings.update_source = env_update_source
+        if env_update_endpoint:
+            settings.update_endpoint = env_update_endpoint
+        if env_update_github_repo:
+            settings.update_github_repo = env_update_github_repo
 
     @property
     def settings(self) -> AppSettings:
         return self._settings
+
+    @property
+    def ai_credentials_locked(self) -> bool:
+        """
+        True si el endpoint o la API Key de IA vienen de variables de
+        entorno / .env. En ese caso, la UI de Configuración debe
+        mostrarlos como solo lectura (no tendría sentido dejar
+        editarlos ahí si en el próximo inicio se van a sobreescribir
+        con el valor de la variable de entorno de todos modos).
+        """
+        return bool(get_ai_endpoint_from_env() or get_ai_api_key_from_env())
 
     def save(self) -> None:
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)

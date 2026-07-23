@@ -1,109 +1,203 @@
-"""
-Panel central de la aplicación: pantalla de bienvenida, conversación
-con burbujas, indicador de "escribiendo..." y caja de entrada de texto.
+from datetime import datetime
+from tkinter import messagebox
 
-También incluye `HistoryPanel`, una vista preparada (sin base de datos
-real todavía) que muestra cómo lucirá el historial de conversaciones
-agrupado por fecha.
-"""
 import customtkinter as ctk
 
 from models.message import Message, Sender
 from ui import theme
+from ui.markdown_blocks import render_markdown
+
+BUBBLE_MAX_WIDTH = 420
 
 
 # ---------------------------------------------------------------------- #
-# Pantalla de bienvenida (sin conversación activa)
+# Home = Chat: saludo personalizado (sin conversación activa todavía)
 # ---------------------------------------------------------------------- #
-class WelcomeScreen(ctk.CTkFrame):
-    """Pantalla mostrada cuando todavía no existe una conversación."""
+class HomeGreeting(ctk.CTkFrame):
+    """
+    Lo que se ve "arriba" del chat cuando no hay conversación activa:
+    saludo grande + subtítulo. La caja de texto de abajo (ChatInputBar)
+    NO es parte de este widget: vive en ChatPanel y está siempre
+    visible, tanto acá como durante una conversación.
+    """
 
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, greeting_text: str = "", subtitle_text: str = "¿En qué puedo ayudarte hoy?", **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, **kwargs)
-        self._build_ui()
+        self._build_ui(greeting_text, subtitle_text)
 
-    def _build_ui(self) -> None:
+    def _build_ui(self, greeting_text: str, subtitle_text: str) -> None:
         container = ctk.CTkFrame(self, fg_color="transparent")
-        container.place(relx=0.5, rely=0.5, anchor="center")
+        container.place(relx=0.5, rely=0.42, anchor="center")
 
-        icon_label = ctk.CTkLabel(
+        self.greeting_label = ctk.CTkLabel(
             container,
-            text="🤖",
-            font=ctk.CTkFont(size=64),
-        )
-        icon_label.pack(pady=(0, 16))
-
-        title_label = ctk.CTkLabel(
-            container,
-            text="Bienvenido al Asistente IA",
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=22, weight="bold"),
+            text=greeting_text,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=28, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
-        title_label.pack(pady=(0, 8))
+        self.greeting_label.pack(pady=(0, 8))
 
-        intro_label = ctk.CTkLabel(
+        self.subtitle_label = ctk.CTkLabel(
             container,
-            text="Puedo ayudarte con:",
+            text=subtitle_text,
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
             text_color=theme.TEXT_MUTED,
         )
-        intro_label.pack(pady=(0, 4))
+        self.subtitle_label.pack()
 
-        items_text = "•  Inventario\n•  Ventas\n•  Clientes\n•  Facturación\n•  Reportes"
-        items_label = ctk.CTkLabel(
-            container,
-            text=items_text,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
-            text_color=theme.TEXT_DARK,
-            justify="left",
-        )
-        items_label.pack()
+    def set_greeting(self, greeting_text: str) -> None:
+        self.greeting_label.configure(text=greeting_text)
 
 
 # ---------------------------------------------------------------------- #
-# Burbuja de mensaje
+# Burbuja de mensaje (Markdown real, Copiar, Regenerar, streaming)
 # ---------------------------------------------------------------------- #
 class MessageBubble(ctk.CTkFrame):
-    """Burbuja individual de un mensaje (usuario o IA)."""
+    """
+    Burbuja individual de un mensaje.
 
-    def __init__(self, master, message: Message, **kwargs):
+    - Renderiza Markdown real (encabezados, código, listas, tablas;
+      ver limitaciones documentadas en ui/markdown_blocks.py).
+    - Botón "Copiar" en toda burbuja.
+    - Botón "↻ Regenerar" en burbujas de la IA (vuelve a pedir la
+      respuesta para la misma pregunta anterior).
+    - Modo `streaming=True`: arranca con texto plano vacío que se va
+      completando con `append_streaming_text()`, y al llamar
+      `finalize()` se reemplaza por el renderizado final en Markdown.
+    """
+
+    def __init__(self, master, message: Message, on_regenerate=None, streaming: bool = False, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         self._message = message
+        self._on_regenerate = on_regenerate
+        self._is_streaming = streaming
+        self._stream_label = None
+        self._content_frame = None
+        self._footer = None
+        self._regenerate_button = None
         self._build_ui()
 
     def _build_ui(self) -> None:
         is_user = self._message.is_user
         bubble_bg = theme.BUBBLE_USER_BG if is_user else theme.BUBBLE_AI_BG
-        text_color = theme.BUBBLE_USER_TEXT if is_user else theme.BUBBLE_AI_TEXT
+        self._text_color = theme.BUBBLE_USER_TEXT if is_user else theme.BUBBLE_AI_TEXT
+        self._is_user = is_user
 
-        bubble = ctk.CTkFrame(self, fg_color=bubble_bg, corner_radius=theme.CORNER_RADIUS)
-        # Alinea a la derecha (usuario) o a la izquierda (IA).
-        bubble.pack(anchor="e" if is_user else "w", padx=12, pady=6)
+        self._bubble = ctk.CTkFrame(self, fg_color=bubble_bg, corner_radius=theme.CORNER_RADIUS)
+        self._bubble.pack(anchor="e" if is_user else "w", padx=12, pady=6)
 
-        text_label = ctk.CTkLabel(
-            bubble,
-            text=self._message.content,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
-            text_color=text_color,
-            wraplength=420,
-            justify="left",
-        )
-        text_label.pack(padx=14, pady=(10, 2), anchor="w")
+        self._content_frame = ctk.CTkFrame(self._bubble, fg_color="transparent")
+        self._content_frame.pack(padx=14, pady=(10, 2), anchor="w", fill="x")
 
-        time_label = ctk.CTkLabel(
-            bubble,
+        if self._is_streaming:
+            self._stream_label = ctk.CTkLabel(
+                self._content_frame,
+                text="",
+                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
+                text_color=self._text_color,
+                wraplength=BUBBLE_MAX_WIDTH,
+                justify="left",
+                anchor="w",
+            )
+            self._stream_label.pack(fill="x", anchor="w")
+        else:
+            render_markdown(self._content_frame, self._message.content, self._text_color, max_width=BUBBLE_MAX_WIDTH)
+
+        self._footer = ctk.CTkFrame(self._bubble, fg_color="transparent")
+        self._footer.pack(padx=14, pady=(0, 8), anchor="e", fill="x")
+        # IMPORTANTE: se arma con grid, no con pack+"spacer con expand=True".
+        # Un frame con expand=True dentro de un CTkScrollableFrame se queda
+        # pegado en 200px de alto (el valor por defecto de CTkFrame) en vez
+        # de ajustarse al contenido — es un bug real de esa combinación
+        # específica (verificado en aislamiento). grid con una columna de
+        # peso logra el mismo layout (hora a la izquierda, botones a la
+        # derecha) sin ese problema.
+        self._footer.grid_columnconfigure(1, weight=1)
+
+        self._time_label = ctk.CTkLabel(
+            self._footer,
             text=self._message.timestamp,
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=9),
-            text_color=text_color,
+            text_color=self._text_color,
         )
-        time_label.pack(padx=14, pady=(0, 8), anchor="e")
+        self._time_label.grid(row=0, column=0, sticky="w")
+        # Columna 1 queda vacía a propósito: con weight=1 actúa como el
+        # espacio flexible entre la hora y los botones.
+
+        if not self._is_streaming:
+            self._build_action_buttons()
+
+    def _build_action_buttons(self) -> None:
+        """Botones Copiar/Regenerar. Se agregan al terminar el streaming (si aplica)."""
+        hover = theme.PRIMARY_BLUE_HOVER if self._is_user else theme.BORDER_LIGHT
+
+        if not self._is_user and self._on_regenerate is not None:
+            self._regenerate_button = ctk.CTkButton(
+                self._footer,
+                text="↻ Regenerar",
+                width=80,
+                height=20,
+                fg_color="transparent",
+                hover_color=hover,
+                text_color=self._text_color,
+                font=ctk.CTkFont(family=theme.FONT_FAMILY, size=9),
+                command=self._handle_regenerate,
+            )
+            self._regenerate_button.grid(row=0, column=2, sticky="e", padx=(4, 0))
+
+        self._copy_button = ctk.CTkButton(
+            self._footer,
+            text="Copiar",
+            width=52,
+            height=20,
+            fg_color="transparent",
+            hover_color=hover,
+            text_color=self._text_color,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=9),
+            command=self._copy_content,
+        )
+        self._copy_button.grid(row=0, column=3, sticky="e", padx=(4, 0))
+
+    def _copy_content(self) -> None:
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(self._message.content)
+        except Exception:
+            pass  # sin portapapeles disponible (ej. entorno de pruebas): no es crítico
+
+    def _handle_regenerate(self) -> None:
+        if self._on_regenerate:
+            self._on_regenerate()
+
+    # ------------------------------------------------------------------ #
+    # API de streaming
+    # ------------------------------------------------------------------ #
+    def append_streaming_text(self, delta: str) -> None:
+        if self._stream_label is not None:
+            self._stream_label.configure(text=self._stream_label.cget("text") + delta)
+
+    def finalize(self, final_message: Message) -> None:
+        """Reemplaza el texto plano en streaming por el renderizado final en Markdown."""
+        self._message = final_message
+        self._is_streaming = False
+
+        if self._stream_label is not None:
+            self._stream_label.destroy()
+            self._stream_label = None
+
+        for widget in self._content_frame.winfo_children():
+            widget.destroy()
+        render_markdown(self._content_frame, final_message.content, self._text_color, max_width=BUBBLE_MAX_WIDTH)
+
+        self._time_label.configure(text=final_message.timestamp)
+        self._build_action_buttons()
 
 
 # ---------------------------------------------------------------------- #
-# Indicador de "escribiendo..."
+# Indicador de "Pensando..." (antes de que llegue el primer token)
 # ---------------------------------------------------------------------- #
 class TypingIndicator(ctk.CTkFrame):
-    """Indicador animado de que la IA está generando una respuesta."""
+    """Indicador animado mientras se espera la respuesta de la IA."""
 
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -112,7 +206,7 @@ class TypingIndicator(ctk.CTkFrame):
 
         self.label = ctk.CTkLabel(
             self,
-            text="La IA está escribiendo...",
+            text="Pensando...",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
             text_color=theme.TEXT_MUTED,
         )
@@ -141,15 +235,16 @@ class TypingIndicator(ctk.CTkFrame):
 
 
 # ---------------------------------------------------------------------- #
-# Caja de entrada de texto
+# Caja de entrada de texto (siempre visible, incluso en el Home)
 # ---------------------------------------------------------------------- #
 class ChatInputBar(ctk.CTkFrame):
     """Caja inferior de composición de mensajes."""
 
-    def __init__(self, master, on_send=None, on_stop=None, **kwargs):
+    def __init__(self, master, on_send=None, on_stop=None, on_attach=None, **kwargs):
         super().__init__(master, fg_color=theme.SURFACE_WHITE, corner_radius=0, **kwargs)
         self._on_send = on_send
         self._on_stop = on_stop
+        self._on_attach = on_attach
         self._is_generating = False
         self._build_ui()
 
@@ -243,8 +338,8 @@ class ChatInputBar(ctk.CTkFrame):
             self._on_send(text)
 
     def _attach_file(self) -> None:
-        # Funcionalidad deshabilitada por diseño en esta iteración.
-        pass
+        if self._on_attach:
+            self._on_attach()
 
     # ------------------------------------------------------------------ #
     # Control de estado mientras la IA responde
@@ -264,85 +359,117 @@ class ChatInputBar(ctk.CTkFrame):
 
 
 # ---------------------------------------------------------------------- #
-# Panel de conversación (bienvenida + burbujas + entrada)
+# Panel de conversación: Home (saludo) <-> conversación, input siempre visible
 # ---------------------------------------------------------------------- #
 class ChatPanel(ctk.CTkFrame):
-    """Contenedor principal: alterna entre bienvenida y conversación activa."""
+    """Home = Chat. Alterna entre el saludo (sin mensajes) y la conversación."""
 
-    def __init__(self, master, on_send_message=None, on_stop_generation=None, **kwargs):
+    def __init__(
+        self,
+        master,
+        on_send_message=None,
+        on_stop_generation=None,
+        on_attach_file=None,
+        on_regenerate_message=None,
+        **kwargs,
+    ):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, **kwargs)
         self._on_send_message = on_send_message
         self._on_stop_generation = on_stop_generation
+        self._on_attach_file = on_attach_file
+        self._on_regenerate_message = on_regenerate_message
         self._typing_indicator: TypingIndicator | None = None
         self._has_conversation = False
+        self._last_user_text: str | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.welcome_screen = WelcomeScreen(self)
-        self.welcome_screen.grid(row=0, column=0, sticky="nsew")
+        self.home_greeting = HomeGreeting(self)
+        self.home_greeting.grid(row=0, column=0, sticky="nsew")
 
         self.messages_container = ctk.CTkScrollableFrame(
             self, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0
         )
 
+        # El input SIEMPRE está visible: en el Home (para poder escribir de
+        # inmediato, como ChatGPT) y durante toda la conversación.
         self.input_bar = ChatInputBar(
             self,
             on_send=self._handle_user_message,
             on_stop=self._handle_stop_requested,
+            on_attach=self._on_attach_file,
         )
+        self.input_bar.grid(row=1, column=0, sticky="ew")
 
     # ------------------------------------------------------------------ #
-    # Transición bienvenida <-> conversación
+    # Transición Home <-> conversación
     # ------------------------------------------------------------------ #
+    def show_home(self, greeting_text: str) -> None:
+        """Home = Chat: saludo grande arriba, input ya visible y listo para escribir."""
+        self._has_conversation = False
+        self._last_user_text = None
+        self.messages_container.grid_forget()
+        self.home_greeting.set_greeting(greeting_text)
+        self.home_greeting.grid(row=0, column=0, sticky="nsew")
+
     def start_new_conversation(self) -> None:
         """Limpia la vista actual y muestra un lienzo de chat vacío."""
         self._has_conversation = True
-        self.welcome_screen.grid_forget()
+        self._last_user_text = None
+        self.home_greeting.grid_forget()
 
         for widget in self.messages_container.winfo_children():
             widget.destroy()
         self._typing_indicator = None
 
         self.messages_container.grid(row=0, column=0, sticky="nsew")
-        self.input_bar.grid(row=1, column=0, sticky="ew")
 
     def load_conversation(self, messages: list[Message]) -> None:
         """Restaura una conversación existente completa (todas sus burbujas)."""
         self._has_conversation = True
-        self.welcome_screen.grid_forget()
+        self._last_user_text = None
+        self.home_greeting.grid_forget()
 
         for widget in self.messages_container.winfo_children():
             widget.destroy()
         self._typing_indicator = None
 
         self.messages_container.grid(row=0, column=0, sticky="nsew")
-        self.input_bar.grid(row=1, column=0, sticky="ew")
 
         for message in messages:
-            bubble = MessageBubble(self.messages_container, message)
-            bubble.pack(fill="x", padx=4, pady=2)
+            self._add_bubble_for_message(message)
         self._scroll_to_bottom()
-
-    def show_welcome(self) -> None:
-        self._has_conversation = False
-        self.messages_container.grid_forget()
-        self.input_bar.grid_forget()
-        self.welcome_screen.grid(row=0, column=0, sticky="nsew")
 
     # ------------------------------------------------------------------ #
     # Mensajes
     # ------------------------------------------------------------------ #
-    def add_message(self, message: Message) -> None:
+    def _add_bubble_for_message(self, message: Message) -> MessageBubble:
+        on_regenerate = None
+        if not message.is_user and self._last_user_text is not None and self._on_regenerate_message:
+            question = self._last_user_text
+            on_regenerate = lambda q=question: self._on_regenerate_message(q)
+
+        bubble = MessageBubble(self.messages_container, message, on_regenerate=on_regenerate)
+        bubble.pack(fill="x", padx=4, pady=2)
+
+        if message.is_user:
+            self._last_user_text = message.content
+
+        return bubble
+
+    def add_message(self, message: Message) -> MessageBubble:
         if not self._has_conversation:
             self.start_new_conversation()
-        bubble = MessageBubble(self.messages_container, message)
-        bubble.pack(fill="x", padx=4, pady=2)
+        bubble = self._add_bubble_for_message(message)
         self._scroll_to_bottom()
+        return bubble
 
     def show_typing_indicator(self) -> None:
+        if not self._has_conversation:
+            self.start_new_conversation()
         if self._typing_indicator is None:
             self._typing_indicator = TypingIndicator(self.messages_container)
         self._typing_indicator.pack(anchor="w", padx=12, pady=4)
@@ -353,10 +480,36 @@ class ChatPanel(ctk.CTkFrame):
         if self._typing_indicator is not None:
             try:
                 self._typing_indicator.stop()
-                self._typing_indicator.pack_forget()
+                self._typing_indicator.destroy()
             except Exception:
                 pass
             self._typing_indicator = None
+
+    # ------------------------------------------------------------------ #
+    # API de streaming (respuesta que se va completando token a token)
+    # ------------------------------------------------------------------ #
+    def start_streaming_assistant_bubble(self) -> MessageBubble:
+        if not self._has_conversation:
+            self.start_new_conversation()
+
+        on_regenerate = None
+        if self._last_user_text is not None and self._on_regenerate_message:
+            question = self._last_user_text
+            on_regenerate = lambda q=question: self._on_regenerate_message(q)
+
+        placeholder_message = Message(content="", sender=Sender.ASSISTANT, timestamp=datetime.now().strftime("%H:%M"))
+        bubble = MessageBubble(self.messages_container, placeholder_message, on_regenerate=on_regenerate, streaming=True)
+        bubble.pack(fill="x", padx=4, pady=2)
+        self._scroll_to_bottom()
+        return bubble
+
+    def append_to_streaming_bubble(self, bubble: MessageBubble, delta: str) -> None:
+        bubble.append_streaming_text(delta)
+        self._scroll_to_bottom()
+
+    def finalize_streaming_bubble(self, bubble: MessageBubble, final_message: Message) -> None:
+        bubble.finalize(final_message)
+        self._scroll_to_bottom()
 
     def _scroll_to_bottom(self) -> None:
         self.messages_container.update_idletasks()
@@ -381,17 +534,15 @@ class ChatPanel(ctk.CTkFrame):
 
 
 # ---------------------------------------------------------------------- #
-# Panel de historial (interfaz preparada, sin base de datos real todavía)
-# ---------------------------------------------------------------------- #
-# ---------------------------------------------------------------------- #
 # Panel de historial (datos reales desde ConversationService)
 # ---------------------------------------------------------------------- #
 class HistoryPanel(ctk.CTkScrollableFrame):
-    """Vista de historial de conversaciones agrupadas por fecha (datos reales)."""
+    """Vista de historial de conversaciones agrupadas (Hoy/Ayer/Últimos 7 días/Este mes/Más antiguas)."""
 
-    def __init__(self, master, on_select_conversation=None, **kwargs):
+    def __init__(self, master, on_select_conversation=None, on_delete_conversation=None, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
         self._on_select_conversation = on_select_conversation
+        self._on_delete_conversation = on_delete_conversation
 
     def refresh(self, grouped_conversations) -> None:
         """
@@ -429,9 +580,7 @@ class HistoryPanel(ctk.CTkScrollableFrame):
 
         time_text = ""
         try:
-            from datetime import datetime as _dt
-
-            time_text = _dt.fromisoformat(conversation.created_at).strftime("%H:%M")
+            time_text = datetime.fromisoformat(conversation.created_at).strftime("%H:%M")
         except ValueError:
             pass
 
@@ -447,6 +596,19 @@ class HistoryPanel(ctk.CTkScrollableFrame):
         )
         item_button.pack(side="left", fill="x", expand=True)
 
+        delete_button = ctk.CTkButton(
+            row,
+            text="🗑",
+            width=28,
+            height=24,
+            fg_color="transparent",
+            hover_color=theme.STATUS_RED,
+            text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
+            command=lambda cid=conversation.id, title=conversation.title: self._handle_delete(cid, title),
+        )
+        delete_button.pack(side="right", padx=(4, 4))
+
         meta_label = ctk.CTkLabel(
             row,
             text=f"{time_text}  ·  {conversation.message_count} msj",
@@ -458,3 +620,12 @@ class HistoryPanel(ctk.CTkScrollableFrame):
     def _handle_select(self, conversation_id: int) -> None:
         if self._on_select_conversation:
             self._on_select_conversation(conversation_id)
+
+    def _handle_delete(self, conversation_id: int, title: str) -> None:
+        confirmed = messagebox.askyesno(
+            "Eliminar conversación",
+            f'¿Eliminar "{title}"?\n\nEsta acción no se puede deshacer.',
+            parent=self,
+        )
+        if confirmed and self._on_delete_conversation:
+            self._on_delete_conversation(conversation_id)

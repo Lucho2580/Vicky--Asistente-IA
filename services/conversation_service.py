@@ -32,6 +32,10 @@ class ConversationService:
     def get_conversation_messages(self, conversation_id: int) -> List[Message]:
         return self._store.get_messages(conversation_id)
 
+    def delete_conversation(self, conversation_id: int) -> None:
+        """Elimina una conversación y todos sus mensajes de forma permanente."""
+        self._store.delete_conversation(conversation_id)
+
     # ------------------------------------------------------------------ #
     # Envío de mensajes
     # ------------------------------------------------------------------ #
@@ -60,12 +64,13 @@ class ConversationService:
         return clean[:max_length].rsplit(" ", 1)[0] + "..."
 
     # ------------------------------------------------------------------ #
-    # Historial agrupado (Hoy / Ayer / fecha)
+    # Historial agrupado (Hoy / Ayer / Últimos 7 días / Este mes / Más antiguas)
     # ------------------------------------------------------------------ #
     def list_grouped_conversations(self) -> List[Tuple[str, List[Conversation]]]:
         """
-        Retorna el historial agrupado por fecha, ej.:
-            [("Hoy", [conv1, conv2]), ("Ayer", [conv3]), ("10/07/2026", [conv4])]
+        Retorna el historial agrupado, ej.:
+            [("Hoy", [conv1]), ("Ayer", [conv2]), ("Últimos 7 días", [conv3]),
+             ("Este mes", [conv4]), ("Más antiguas", [conv5])]
 
         Solo incluye conversaciones que ya tienen al menos un mensaje
         (una conversación recién creada por "Nuevo Chat" pero vacía
@@ -73,21 +78,13 @@ class ConversationService:
         """
         all_conversations = [c for c in self._store.get_all_conversations() if c.message_count > 0]
 
-        today = date.today()
-        yesterday = today - timedelta(days=1)
-
         groups: List[Tuple[str, List[Conversation]]] = []
         current_label = None
         current_items: List[Conversation] = []
 
         for conversation in all_conversations:
             conv_date = self._parse_date(conversation.created_at)
-            if conv_date == today:
-                label = "Hoy"
-            elif conv_date == yesterday:
-                label = "Ayer"
-            else:
-                label = conv_date.strftime("%d/%m/%Y")
+            label = self._group_label_for_date(conv_date)
 
             if label != current_label:
                 if current_label is not None:
@@ -100,6 +97,28 @@ class ConversationService:
             groups.append((current_label, current_items))
 
         return groups
+
+    @staticmethod
+    def _group_label_for_date(conv_date: date, today: date | None = None) -> str:
+        """
+        Clasifica una fecha en uno de los 5 grupos. El orden de los
+        `if` importa: "Últimos 7 días" se evalúa antes que "Este mes"
+        para que, por ejemplo, una conversación de hace 3 días quede
+        en "Últimos 7 días" aunque sea del mes actual.
+        """
+        today = today or date.today()
+        yesterday = today - timedelta(days=1)
+        week_ago = today - timedelta(days=7)
+
+        if conv_date == today:
+            return "Hoy"
+        if conv_date == yesterday:
+            return "Ayer"
+        if conv_date > week_ago:
+            return "Últimos 7 días"
+        if conv_date.year == today.year and conv_date.month == today.month:
+            return "Este mes"
+        return "Más antiguas"
 
     @staticmethod
     def _parse_date(iso_timestamp: str) -> date:

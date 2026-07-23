@@ -11,12 +11,21 @@
   IMPORTANTE: UpgradeCode es fijo y NO debe cambiar entre versiones:
   es lo que permite que un instalador nuevo reemplace correctamente
   al anterior en vez de instalarse en paralelo.
+
+  El atributo Version del Product (más abajo, hoy en 0.0.0.0) es un
+  PLACEHOLDER: el workflow de GitHub Actions (y build_msi.ps1 para
+  builds locales) generan una copia temporal de este archivo con la
+  versión real ya sustituida (packaging/wix/obj/Product.generated.wxs)
+  y compilan ESA copia — este archivo fuente nunca se modifica en el
+  repositorio. No se pasa por -d de candle.exe porque esa vía tiene
+  un problema real de parseo de argumentos con candle.exe (ver
+  CNDL0103 en el historial del proyecto).
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
            Name="Asistente IA - La Vianda"
            Language="1033"
-           Version="1.0.0.0"
+           Version="0.0.0.0"
            Manufacturer="La Vianda"
            UpgradeCode="755C98A5-480D-440E-A7F2-BC176B2DA485">
 
@@ -37,6 +46,25 @@
     <Icon Id="AppIcon.ico" SourceFile="$(var.SourceDir)/AsistenteIA.exe" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
     <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+
+    <!-- ==============================================================
+         Interfaz del instalador: Bienvenida -> Licencia -> Carpeta de
+         instalación (con botón "Change..." y "Install") -> Progreso ->
+         Finalizar. Es la secuencia estándar de WixUI_InstallDir, la
+         misma que usan miles de instaladores WiX sin problemas.
+         ============================================================== -->
+    <WixVariable Id="WixUILicenseRtf" Value="packaging/wix/license.rtf" />
+    <UIRef Id="WixUI_InstallDir" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+
+    <!-- NOTA: se probó agregar acá un checkbox "Iniciar Asistente IA..."
+         en la pantalla final (vía WIXUI_EXITDIALOGOPTIONALCHECKBOX +
+         un CustomAction WixShellExec), pero causaba el error 2819 al
+         instalar en una máquina real y no se pudo verificar la causa
+         exacta sin acceso a Windows/WiX Toolset real para depurarlo. Se
+         quitó para no seguir bloqueando la instalación; queda pendiente
+         retomarlo más adelante con logs reales
+         (msiexec /i AsistenteIA-Setup.msi /l*v install.log). -->
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">

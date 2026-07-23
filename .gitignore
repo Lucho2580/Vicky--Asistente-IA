@@ -1,36 +1,11 @@
-# Python bytecode
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environments
+*.pyc
 .venv/
 venv/
-env/
-ENV/
-
-# Test and coverage artifacts
-.pytest_cache/
-.coverage
-htmlcov/
-.coverage.*
-
-# Distribution / packaging
+*.db
+*.bin
+.env
 build/
 dist/
-*.egg-info/
-*.egg
-
-# Environment and local config
-.env
-.env.*
-.env.example
-*.local
-
-# IDE/editor files
-.vscode/
-.idea/
-
-# OS files
-.DS_Store
-Thumbs.db
+packaging/wix/obj/
+packaging/wix/Files.wxs
