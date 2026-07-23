@@ -1,6 +1,11 @@
 # Interfaz gráfica
 customtkinter>=5.2
 
+# Manejo de imágenes (logo en la pantalla de login). customtkinter ya
+# depende de esto internamente, pero se deja explícito porque
+# ui/login_window.py también la usa directamente.
+Pillow>=10.0
+
 # Login con Microsoft (Entra ID / Azure AD), device code flow
 msal>=1.30
 

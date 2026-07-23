@@ -17,7 +17,7 @@ para empaquetar con WiX/MSI en vez de "one-file").
 """
 import os
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # SPECPATH es una variable que PyInstaller inyecta automáticamente en
 # este archivo: apunta a la carpeta donde vive este .spec, sin importar
@@ -28,10 +28,21 @@ APP_NAME = "AsistenteIA"
 
 # customtkinter necesita sus assets (temas, fuentes) empaquetados como datos.
 datas = collect_data_files("customtkinter")
+# Nuestros propios assets (logo real para la pantalla de login) — sin
+# esto, el .exe compilado no encuentra ui/assets/logo.png en tiempo de
+# ejecución (queda dentro de la app, pero el análisis de PyInstaller no
+# copia archivos de datos "sueltos" que no sean de una librería).
+datas += [(os.path.join(PROJECT_ROOT, "ui", "assets"), "ui/assets")]
 # Nota: NO se empaqueta config/settings.json aquí a propósito. La app
 # genera su propia configuración y base de datos en la carpeta de datos
 # de usuario (ver core/paths.py) la primera vez que se ejecuta, nunca
 # dentro de la carpeta de instalación.
+
+# Pillow (PIL): se usa directamente en ui/login_window.py para mostrar
+# el logo real. El análisis estático de PyInstaller no siempre detecta
+# todos sus submódulos (falló en una build real con "No module named
+# 'PIL'"), así que se fuerza explícitamente acá.
+hidden_imports = collect_submodules("PIL") + ["PIL._tkinter_finder"]
 
 block_cipher = None
 
@@ -40,7 +51,7 @@ a = Analysis(
     pathex=[PROJECT_ROOT],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
