@@ -2,12 +2,27 @@ from datetime import datetime
 from tkinter import messagebox
 
 import customtkinter as ctk
+from PIL import Image
 
 from models.message import Message, Sender
 from ui import theme
+from ui.assets_path import get_asset_path
 from ui.markdown_blocks import render_markdown
 
 BUBBLE_MAX_WIDTH = 420
+_LOGO_PATH = get_asset_path("logo.png")
+_LOGO_WATERMARK_PATH = get_asset_path("logo_watermark.png")
+
+# Sugerencias fijas del Home (ver README: pendiente decidir si se
+# generan a partir de lo cargado en la carpeta Training, o quedan
+# fijas como acá — por ahora quedan fijas, es la opción de
+# implementación inmediata).
+HOME_SUGGESTIONS = [
+    ("Cambiar mi contraseña", "Correo o sistema interno", "¿Cómo cambio mi contraseña?"),
+    ("Política de vacaciones", "Días disponibles y trámite", "¿Cuál es la política de vacaciones?"),
+    ("Reportar un problema", "Crear un ticket de soporte", "¿Cómo reporto un problema?"),
+    ("¿Qué podés hacer?", "Conocé al asistente", "¿Qué podés hacer por mí?"),
+]
 
 
 # ---------------------------------------------------------------------- #
@@ -16,26 +31,59 @@ BUBBLE_MAX_WIDTH = 420
 class HomeGreeting(ctk.CTkFrame):
     """
     Lo que se ve "arriba" del chat cuando no hay conversación activa:
-    saludo grande + subtítulo. La caja de texto de abajo (ChatInputBar)
-    NO es parte de este widget: vive en ChatPanel y está siempre
-    visible, tanto acá como durante una conversación.
+    ícono + saludo grande + subtítulo + sugerencias rápidas. La caja de
+    texto de abajo (ChatInputBar) NO es parte de este widget: vive en
+    ChatPanel y está siempre visible, tanto acá como durante una
+    conversación.
     """
 
-    def __init__(self, master, greeting_text: str = "", subtitle_text: str = "¿En qué puedo ayudarte hoy?", **kwargs):
+    def __init__(
+        self,
+        master,
+        greeting_text: str = "",
+        subtitle_text: str = "¿En qué puedo ayudarte hoy?",
+        on_suggestion_click=None,
+        **kwargs,
+    ):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, **kwargs)
+        self._on_suggestion_click = on_suggestion_click
         self._build_ui(greeting_text, subtitle_text)
 
     def _build_ui(self, greeting_text: str, subtitle_text: str) -> None:
+        # Marca de agua de fondo cubriendo TODO el espacio disponible
+        # (no solo una esquina): se recalcula cada vez que el panel
+        # cambia de tamaño, manteniendo la proporción de la imagen
+        # (recorta el sobrante, como "background-size: cover" en CSS).
+        try:
+            self._watermark_source = Image.open(_LOGO_WATERMARK_PATH).convert("RGBA")
+            self._watermark_label = ctk.CTkLabel(self, text="")
+            self._watermark_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self._watermark_label.lower()  # detrás del resto del contenido
+            self.bind("<Configure>", self._update_watermark, add="+")
+        except Exception:
+            self._watermark_source = None  # si el archivo no está disponible, se sigue sin ella
+
         container = ctk.CTkFrame(self, fg_color="transparent")
         container.place(relx=0.5, rely=0.42, anchor="center")
+
+        try:
+            icon_circle = ctk.CTkFrame(
+                container, width=56, height=56, corner_radius=28, fg_color=theme.PRIMARY_RED_LIGHT
+            )
+            icon_circle.pack(pady=(0, 14))
+            icon_circle.pack_propagate(False)
+            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(28, 28))
+            ctk.CTkLabel(icon_circle, image=logo_image, text="").place(relx=0.5, rely=0.5, anchor="center")
+        except Exception:
+            pass  # si el logo no está disponible, se sigue sin el ícono
 
         self.greeting_label = ctk.CTkLabel(
             container,
             text=greeting_text,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=28, weight="bold"),
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=26, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
-        self.greeting_label.pack(pady=(0, 8))
+        self.greeting_label.pack(pady=(0, 6))
 
         self.subtitle_label = ctk.CTkLabel(
             container,
@@ -43,7 +91,84 @@ class HomeGreeting(ctk.CTkFrame):
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
             text_color=theme.TEXT_MUTED,
         )
-        self.subtitle_label.pack()
+        self.subtitle_label.pack(pady=(0, 22))
+
+        suggestions_grid = ctk.CTkFrame(container, fg_color="transparent")
+        suggestions_grid.pack()
+        suggestions_grid.grid_columnconfigure((0, 1), weight=1, uniform="col")
+
+        for index, (title, subtitle, prompt) in enumerate(HOME_SUGGESTIONS):
+            row, col = divmod(index, 2)
+            self._add_suggestion_card(suggestions_grid, title, subtitle, prompt, row, col)
+
+    def _add_suggestion_card(self, parent, title: str, subtitle: str, prompt: str, row: int, col: int) -> None:
+        card = ctk.CTkButton(
+            parent,
+            text="",
+            width=250,
+            height=54,
+            corner_radius=theme.CORNER_RADIUS,
+            fg_color=theme.SURFACE_WHITE,
+            hover_color=theme.BACKGROUND_LIGHT,
+            border_width=1,
+            border_color=theme.BORDER_LIGHT,
+            command=lambda p=prompt: self._handle_suggestion_click(p),
+        )
+        card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+
+        # El texto del boton se arma con dos labels superpuestos (titulo
+        # + subtitulo en dos tamaños/colores), ya que CTkButton solo
+        # soporta un texto simple con un unico estilo.
+        text_container = ctk.CTkFrame(card, fg_color="transparent")
+        text_container.place(relx=0.06, rely=0.5, anchor="w")
+        ctk.CTkLabel(
+            text_container, text=title, font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL, weight="bold"),
+            text_color=theme.TEXT_DARK, anchor="w",
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            text_container, text=subtitle, font=ctk.CTkFont(family=theme.FONT_FAMILY, size=9),
+            text_color=theme.TEXT_MUTED, anchor="w",
+        ).pack(anchor="w")
+
+    def _handle_suggestion_click(self, prompt: str) -> None:
+        if self._on_suggestion_click:
+            self._on_suggestion_click(prompt)
+
+    def _update_watermark(self, event=None) -> None:
+        if not getattr(self, "_watermark_source", None):
+            return
+        width = self.winfo_width()
+        height = self.winfo_height()
+        if width < 2 or height < 2:
+            return  # todavía no tiene un tamaño real asignado
+
+        # Evita recalcular si el tamaño no cambió realmente (Configure
+        # también se dispara por otros motivos, no solo al redimensionar).
+        if getattr(self, "_last_watermark_size", None) == (width, height):
+            return
+        self._last_watermark_size = (width, height)
+
+        cover = self._make_cover_image(self._watermark_source, width, height)
+        # Se guarda la referencia en self: si no, Python la recolecta
+        # como basura apenas termina la función y la imagen desaparece.
+        self._watermark_image = ctk.CTkImage(cover, size=(width, height))
+        self._watermark_label.configure(image=self._watermark_image)
+
+    @staticmethod
+    def _make_cover_image(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
+        """Redimensiona + recorta manteniendo proporción, cubriendo todo target_w x target_h (como CSS 'cover')."""
+        img_ratio = image.width / image.height
+        target_ratio = target_w / max(target_h, 1)
+        if img_ratio > target_ratio:
+            new_h = target_h
+            new_w = max(int(new_h * img_ratio), 1)
+        else:
+            new_w = target_w
+            new_h = max(int(new_w / img_ratio), 1)
+        resized = image.resize((new_w, new_h), Image.LANCZOS)
+        left = (new_w - target_w) // 2
+        top = (new_h - target_h) // 2
+        return resized.crop((left, top, left + target_w, top + target_h))
 
     def set_greeting(self, greeting_text: str) -> None:
         self.greeting_label.configure(text=greeting_text)
@@ -387,7 +512,7 @@ class ChatPanel(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.home_greeting = HomeGreeting(self)
+        self.home_greeting = HomeGreeting(self, on_suggestion_click=self._handle_user_message)
         self.home_greeting.grid(row=0, column=0, sticky="nsew")
 
         self.messages_container = ctk.CTkScrollableFrame(

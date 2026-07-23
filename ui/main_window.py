@@ -169,7 +169,7 @@ class MainWindow(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
-        self.sidebar = Sidebar(self, on_navigate=self._handle_navigate)
+        self.sidebar = Sidebar(self, on_navigate=self._handle_navigate, display_name=self._display_name)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
 
         self.content_container = ctk.CTkFrame(self, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0)

@@ -43,6 +43,13 @@ STATUS_GREEN = "#1F9D55"
 STATUS_YELLOW = "#D9A400"
 STATUS_RED = "#E5484D"
 
+# Tonos claros para los "chips" de estado de la barra inferior
+# (fondo pastel + texto oscuro del mismo tono, en vez de un punto suelto).
+STATUS_GREEN_BG = "#EAF3DE"
+STATUS_GREEN_TEXT = "#27500A"
+STATUS_NEUTRAL_BG = "#F1EFE8"
+STATUS_NEUTRAL_TEXT = "#5F5E5A"
+
 FONT_FAMILY = "Segoe UI"
 FONT_SIZE_TITLE = 16
 FONT_SIZE_NORMAL = 13
