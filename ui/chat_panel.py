@@ -129,7 +129,7 @@ class MessageBubble(ctk.CTkFrame):
 
     def _build_action_buttons(self) -> None:
         """Botones Copiar/Regenerar. Se agregan al terminar el streaming (si aplica)."""
-        hover = theme.PRIMARY_BLUE_HOVER if self._is_user else theme.BORDER_LIGHT
+        hover = theme.PRIMARY_RED_HOVER if self._is_user else theme.BORDER_LIGHT
 
         if not self._is_user and self._on_regenerate is not None:
             self._regenerate_button = ctk.CTkButton(
@@ -216,7 +216,7 @@ class TypingIndicator(ctk.CTkFrame):
             self,
             text="",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
-            text_color=theme.PRIMARY_BLUE,
+            text_color=theme.PRIMARY_RED,
         )
         self.dots_label.pack(side="left", pady=6)
 
@@ -256,7 +256,7 @@ class ChatInputBar(ctk.CTkFrame):
             text="📎",
             width=36,
             fg_color="transparent",
-            hover_color=theme.PRIMARY_BLUE_LIGHT,
+            hover_color=theme.PRIMARY_RED_LIGHT,
             text_color=theme.TEXT_MUTED,
             command=self._attach_file,
         )
@@ -294,8 +294,8 @@ class ChatInputBar(ctk.CTkFrame):
             text="Enviar",
             width=90,
             corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE,
-            hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
             command=self._handle_send_or_stop,
         )
         self.send_button.grid(row=0, column=3, padx=(4, 12), pady=10)
@@ -354,7 +354,7 @@ class ChatInputBar(ctk.CTkFrame):
         else:
             self.text_entry.configure(state="normal")
             self.send_button.configure(
-                text="Enviar", fg_color=theme.PRIMARY_BLUE, hover_color=theme.PRIMARY_BLUE_HOVER
+                text="Enviar", fg_color=theme.PRIMARY_RED, hover_color=theme.PRIMARY_RED_HOVER
             )
 
 
@@ -589,7 +589,7 @@ class HistoryPanel(ctk.CTkScrollableFrame):
             text=f"💬  {conversation.title}",
             anchor="w",
             fg_color="transparent",
-            hover_color=theme.PRIMARY_BLUE_LIGHT,
+            hover_color=theme.PRIMARY_RED_LIGHT,
             text_color=theme.TEXT_DARK,
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
             command=lambda cid=conversation.id: self._handle_select(cid),

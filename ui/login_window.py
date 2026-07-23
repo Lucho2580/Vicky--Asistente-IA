@@ -54,7 +54,7 @@ class LoginOverlay(ctk.CTkFrame):
 
         title = ctk.CTkLabel(
             container,
-            text="Asistente IA - La Vianda",
+            text="Vicky Consulting",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=22, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
@@ -74,8 +74,8 @@ class LoginOverlay(ctk.CTkFrame):
             width=280,
             height=40,
             corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE,
-            hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
             command=self._handle_login_click,
         )
         self._login_button.pack(pady=(0, 12))
@@ -99,7 +99,7 @@ class LoginOverlay(ctk.CTkFrame):
             self._code_frame,
             text="",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL, weight="bold"),
-            text_color=theme.PRIMARY_BLUE,
+            text_color=theme.PRIMARY_RED,
         )
         self._url_label.pack(padx=16)
 
@@ -116,8 +116,8 @@ class LoginOverlay(ctk.CTkFrame):
             text="Copiar código",
             width=140,
             height=26,
-            fg_color=theme.PRIMARY_BLUE_LIGHT,
-            text_color=theme.PRIMARY_BLUE,
+            fg_color=theme.PRIMARY_RED_LIGHT,
+            text_color=theme.PRIMARY_RED,
             hover_color=theme.BORDER_LIGHT,
             command=self._copy_code,
         )

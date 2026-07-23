@@ -58,7 +58,7 @@ class ContentHeader(ctk.CTkFrame):
 
         title_label = ctk.CTkLabel(
             self,
-            text="Asistente IA - La Vianda",
+            text="Vicky Consulting",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
@@ -89,7 +89,7 @@ class ContentHeader(ctk.CTkFrame):
 
 
 class MainWindow(ctk.CTk):
-    """Ventana principal de Asistente IA - La Vianda."""
+    """Ventana principal de Vicky Consulting."""
 
     def __init__(self, display_name: str | None = None) -> None:
         super().__init__()
@@ -97,7 +97,7 @@ class MainWindow(ctk.CTk):
         # build_greeting() cae solo al usuario del sistema operativo (getpass),
         # igual que antes de que existiera el login.
         self._display_name = display_name
-        self.title("Asistente IA - La Vianda")
+        self.title("Vicky Consulting")
         self.geometry("1100x720")
         self.minsize(900, 600)
 

@@ -1,5 +1,5 @@
 """
-Punto de entrada de Asistente IA - La Vianda (versión CustomTkinter).
+Punto de entrada de Vicky Consulting (versión CustomTkinter).
 
 Se crea UNA SOLA vez la ventana principal (`MainWindow`), que primero
 muestra el login (con Microsoft, si está configurado) como un overlay

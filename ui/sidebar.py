@@ -10,7 +10,7 @@ Botones deshabilitados (funcionalidad futura):
        responde al clic.
 
 El botón correspondiente a la vista actualmente seleccionada se
-resalta con el color de acento azul.
+resalta con el color de acento rojo (corporativo de La Vianda).
 """
 import customtkinter as ctk
 
@@ -63,7 +63,7 @@ class Sidebar(ctk.CTkFrame):
 
         header = ctk.CTkLabel(
             self,
-            text="La Vianda",
+            text="Vicky Consulting",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_TITLE, weight="bold"),
             text_color="#FFFFFF",
         )

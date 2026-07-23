@@ -1,6 +1,6 @@
 name: Build Windows MSI
 
-# Genera el instalador .msi de "Asistente IA - La Vianda" en un runner
+# Genera el instalador .msi de "Vicky Consulting" en un runner
 # real de Windows (windows-latest), sin que necesites tener Windows en
 # tu propia computadora. El .msi resultante queda disponible para
 # descargar como "artifact" del workflow.
@@ -22,6 +22,8 @@ on:
 jobs:
   build-msi:
     runs-on: windows-latest
+    permissions:
+      contents: write  # necesario para crear el GitHub Release con el .msi adjunto
 
     steps:
       - name: Descargar el código
@@ -103,7 +105,9 @@ jobs:
             "ASISTENTEIA_MS_CLIENT_ID=$env:ASISTENTEIA_MS_CLIENT_ID",
             "ASISTENTEIA_MS_TENANT_ID=$env:ASISTENTEIA_MS_TENANT_ID",
             "ASISTENTEIA_AI_ENDPOINT=$env:ASISTENTEIA_AI_ENDPOINT",
-            "ASISTENTEIA_AI_API_KEY=$env:ASISTENTEIA_AI_API_KEY"
+            "ASISTENTEIA_AI_API_KEY=$env:ASISTENTEIA_AI_API_KEY",
+            "ASISTENTEIA_UPDATE_SOURCE=github",
+            "ASISTENTEIA_UPDATE_GITHUB_REPO=$env:GITHUB_REPOSITORY"
           )
           Set-Content -Path "dist\AsistenteIA\.env" -Value $lines -Encoding utf8
         shell: pwsh
@@ -131,3 +135,18 @@ jobs:
         with:
           name: AsistenteIA-Setup
           path: dist\AsistenteIA-Setup.msi
+
+      - name: Crear GitHub Release con el .msi adjunto
+        # Esto es lo que consulta el sistema de actualizaciones dentro de
+        # la app (UpdateManager con source="github"): NO alcanza con el
+        # artifact de arriba (eso solo queda dentro de la corrida del
+        # workflow) — hace falta un Release real, que es lo que expone
+        # la API pública /releases/latest que la app consulta.
+        # Solo se crea cuando el build viene de un tag "vX.Y.Z" (no en
+        # corridas manuales sin tag).
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist\AsistenteIA-Setup.msi
+          name: Vicky Consulting ${{ github.ref_name }}
+          generate_release_notes: true

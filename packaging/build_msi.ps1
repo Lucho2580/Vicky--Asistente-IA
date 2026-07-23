@@ -1,6 +1,6 @@
 # build_msi.ps1
 #
-# Compila "Asistente IA - La Vianda" como ejecutable independiente
+# Compila "Vicky Consulting" como ejecutable independiente
 # (PyInstaller) y lo empaqueta en un instalador .msi (WiX Toolset v3).
 #
 # REQUISITOS (en tu máquina Windows):

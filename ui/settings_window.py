@@ -126,8 +126,8 @@ class SettingsPage(ctk.CTkScrollableFrame):
             button_row,
             text="Probar conexión",
             corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE,
-            hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
             command=self._test_db_connection,
         )
         test_button.pack(side="left")
@@ -211,8 +211,8 @@ class SettingsPage(ctk.CTkScrollableFrame):
             text="Abrir carpeta",
             width=110,
             corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE,
-            hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
             command=self._open_training_folder,
         )
         open_training_button.pack(side="left", padx=(0, 6))
@@ -252,8 +252,8 @@ class SettingsPage(ctk.CTkScrollableFrame):
             files_header,
             text="📎 Subir archivo manualmente",
             corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE,
-            hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
             width=190,
             command=self._upload_training_file,
         )
@@ -486,7 +486,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
         card.pack(fill="x", padx=24, pady=12)
 
         self._auto_check_switch = ctk.CTkSwitch(
-            card, text="Buscar actualizaciones automáticamente", progress_color=theme.PRIMARY_BLUE,
+            card, text="Buscar actualizaciones automáticamente", progress_color=theme.PRIMARY_RED,
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
         )
         if settings.auto_check_updates:
@@ -494,7 +494,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self._auto_check_switch.pack(anchor="w", padx=20, pady=(0, 8))
 
         self._check_on_startup_switch = ctk.CTkSwitch(
-            card, text="Buscar al iniciar la aplicación", progress_color=theme.PRIMARY_BLUE,
+            card, text="Buscar al iniciar la aplicación", progress_color=theme.PRIMARY_RED,
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
         )
         if settings.check_updates_on_startup:
@@ -511,7 +511,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
         ).pack(side="left")
         for label in ["Estable", "Beta"]:
             ctk.CTkRadioButton(
-                channel_row, text=label, value=label, variable=self._update_channel_var, fg_color=theme.PRIMARY_BLUE,
+                channel_row, text=label, value=label, variable=self._update_channel_var, fg_color=theme.PRIMARY_RED,
             ).pack(side="left", padx=(0, 16))
 
         self._update_frequency_menu = card.add_field(
@@ -529,7 +529,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
 
         check_now_button = ctk.CTkButton(
             card, text="Buscar actualizaciones ahora", corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE, hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED, hover_color=theme.PRIMARY_RED_HOVER,
             command=self._handle_check_updates_now,
         )
         check_now_button.pack(anchor="w", padx=20, pady=(0, 4))
@@ -557,7 +557,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
                 text=label,
                 value=label,
                 variable=self._theme_var,
-                fg_color=theme.PRIMARY_BLUE,
+                fg_color=theme.PRIMARY_RED,
                 command=self._apply_theme_now,
             ).pack(side="left", padx=(0, 16))
 
@@ -605,8 +605,8 @@ class SettingsPage(ctk.CTkScrollableFrame):
             button_row,
             text="Abrir carpeta",
             corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE,
-            hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
             command=self._open_conversations_folder,
         )
         open_button.pack(side="left")

@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Spec de PyInstaller para "Asistente IA - La Vianda".
+Spec de PyInstaller para "Vicky Consulting".
 
 Genera un ejecutable de Windows independiente (no requiere que el
 usuario final tenga Python instalado). Este archivo debe ejecutarse
@@ -61,7 +61,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,  # sin consola, es una app de escritorio con GUI
-    icon=None,  # agrega aquí la ruta a un .ico propio si tienes uno
+    icon=os.path.join(SPECPATH, "icon.ico"),  # logo de La Vianda
 )
 
 coll = COLLECT(

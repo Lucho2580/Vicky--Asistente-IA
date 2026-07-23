@@ -31,7 +31,7 @@ class AboutPage(ctk.CTkScrollableFrame):
 
         title_label = ctk.CTkLabel(
             header,
-            text="Asistente IA - La Vianda",
+            text="Vicky Consulting",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=20, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
@@ -61,7 +61,7 @@ class AboutPage(ctk.CTkScrollableFrame):
 
         check_updates_button = ctk.CTkButton(
             button_row, text="Buscar actualizaciones", corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_BLUE, hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED, hover_color=theme.PRIMARY_RED_HOVER,
             command=self._handle_check_updates,
         )
         check_updates_button.pack(side="left", padx=(0, 8))

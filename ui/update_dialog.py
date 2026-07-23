@@ -158,8 +158,8 @@ class UpdateDialog(ctk.CTkToplevel):
         update_button = ctk.CTkButton(
             button_row,
             text="Actualizar ahora",
-            fg_color=theme.PRIMARY_BLUE,
-            hover_color=theme.PRIMARY_BLUE_HOVER,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
             command=self._start_download,
         )
         update_button.pack(side="left", fill="x", expand=True)
@@ -208,7 +208,7 @@ class UpdateDialog(ctk.CTkToplevel):
         )
         title.pack(anchor="w", pady=(20, 16))
 
-        self._progress_bar = ctk.CTkProgressBar(self._container, progress_color=theme.PRIMARY_BLUE)
+        self._progress_bar = ctk.CTkProgressBar(self._container, progress_color=theme.PRIMARY_RED)
         self._progress_bar.set(0)
         self._progress_bar.pack(fill="x", pady=(0, 8))
 

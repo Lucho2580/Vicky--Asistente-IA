@@ -1,5 +1,5 @@
 """
-Página de Ayuda: guía rápida de uso del Asistente IA - La Vianda.
+Página de Ayuda: guía rápida de uso del Vicky Consulting.
 
 Se muestra dentro del panel principal (igual que Configuración), no en
 una ventana aparte.
