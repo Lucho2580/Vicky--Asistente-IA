@@ -19,19 +19,34 @@ la aplicación (ver ui/main_window.py): el login es solo un `CTkFrame`
 que se muestra primero y se destruye a sí mismo al terminar, dejando
 lugar al resto de la interfaz en la MISMA ventana.
 
+Diseño: tarjeta centrada de panel dividido — el panel izquierdo (gris
+oscuro, con el logo real de La Vianda) queda fijo durante todo el
+proceso; el panel derecho cambia de contenido según el paso (botón de
+login -> código de dispositivo), sin que la tarjeta cambie de tamaño
+ni de posición entre un paso y el otro.
+
 Intenta primero un login silencioso (si ya se inició sesión antes en
 esta computadora, no vuelve a pedir nada). Si no hay sesión guardada,
 exige "Iniciar sesión con Microsoft" (código de dispositivo) — el
 acceso está centralizado en la cuenta de correo de Microsoft, no
 existe una vía para entrar sin loguearse.
 """
+import os
 import threading
 import webbrowser
 
 import customtkinter as ctk
+from PIL import Image
 
 from core.microsoft_auth import MicrosoftAuthService, is_configured
 from ui import theme
+
+_ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+_LOGO_PATH = os.path.join(_ASSETS_DIR, "logo.png")
+
+CARD_WIDTH = 640
+CARD_HEIGHT = 420
+LEFT_PANEL_WIDTH = 240
 
 
 class LoginOverlay(ctk.CTkFrame):
@@ -49,30 +64,83 @@ class LoginOverlay(ctk.CTkFrame):
         self.after(200, self._try_silent_login)
 
     def _build_ui(self) -> None:
-        container = ctk.CTkFrame(self, fg_color="transparent")
-        container.place(relx=0.5, rely=0.5, anchor="center")
+        # Tarjeta centrada (panel dividido), flotando sobre el fondo neutro.
+        card = ctk.CTkFrame(
+            self,
+            width=CARD_WIDTH,
+            height=CARD_HEIGHT,
+            fg_color=theme.SURFACE_WHITE,
+            corner_radius=theme.CORNER_RADIUS,
+            border_width=1,
+            border_color=theme.BORDER_LIGHT,
+        )
+        card.place(relx=0.5, rely=0.5, anchor="center")
+        card.pack_propagate(False)
+        card.grid_propagate(False)
+        card.grid_columnconfigure(1, weight=1)
+        card.grid_rowconfigure(0, weight=1)
+
+        # ------------------------------------------------------------ #
+        # Panel izquierdo: fijo, gris oscuro corporativo, logo real.
+        # No cambia entre el paso del botón y el paso del código.
+        # ------------------------------------------------------------ #
+        left_panel = ctk.CTkFrame(
+            card, width=LEFT_PANEL_WIDTH, fg_color=theme.SIDEBAR_BG, corner_radius=0
+        )
+        left_panel.grid(row=0, column=0, sticky="nsew")
+        left_panel.grid_propagate(False)
+
+        logo_container = ctk.CTkFrame(left_panel, fg_color="transparent")
+        logo_container.place(relx=0.5, rely=0.5, anchor="center")
+
+        try:
+            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(72, 72))
+            logo_label = ctk.CTkLabel(logo_container, image=logo_image, text="")
+            logo_label.pack(pady=(0, 14))
+        except Exception:
+            pass  # si el archivo del logo no está disponible, se sigue sin él
+
+        brand_label = ctk.CTkLabel(
+            logo_container,
+            text="Vicky\nConsulting",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=17, weight="bold"),
+            text_color="#FFFFFF",
+            justify="center",
+        )
+        brand_label.pack()
+
+        # ------------------------------------------------------------ #
+        # Panel derecho: cambia de contenido según el paso (botón <-> código).
+        # ------------------------------------------------------------ #
+        self._right_panel = ctk.CTkFrame(card, fg_color="transparent")
+        self._right_panel.grid(row=0, column=1, sticky="nsew", padx=36, pady=32)
+
+        right_content = ctk.CTkFrame(self._right_panel, fg_color="transparent")
+        right_content.place(relx=0.5, rely=0.5, anchor="center")
 
         title = ctk.CTkLabel(
-            container,
-            text="Vicky Consulting",
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=22, weight="bold"),
+            right_content,
+            text="Bienvenido de nuevo",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=18, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
         title.pack(pady=(0, 4))
 
         subtitle = ctk.CTkLabel(
-            container,
-            text="Inicia sesión para continuar",
+            right_content,
+            text="Iniciá sesión con tu cuenta corporativa para continuar.",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
             text_color=theme.TEXT_MUTED,
+            wraplength=320,
+            justify="center",
         )
-        subtitle.pack(pady=(0, 24))
+        subtitle.pack(pady=(0, 22))
 
         self._login_button = ctk.CTkButton(
-            container,
+            right_content,
             text="🔑 Iniciar sesión con Microsoft",
-            width=280,
-            height=40,
+            width=300,
+            height=42,
             corner_radius=theme.CORNER_RADIUS,
             fg_color=theme.PRIMARY_RED,
             hover_color=theme.PRIMARY_RED_HOVER,
@@ -84,16 +152,15 @@ class LoginOverlay(ctk.CTkFrame):
             self._login_button.configure(state="disabled")
 
         # --- Área del código de dispositivo (oculta hasta que haga falta) ---
-        self._code_frame = ctk.CTkFrame(container, fg_color=theme.SURFACE_WHITE, corner_radius=theme.CORNER_RADIUS)
+        self._code_frame = ctk.CTkFrame(right_content, fg_color="transparent")
 
         code_instructions = ctk.CTkLabel(
             self._code_frame,
-            text="Abre esta página en tu navegador e ingresa el código:",
+            text="Andá a",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
             text_color=theme.TEXT_MUTED,
-            wraplength=380,
         )
-        code_instructions.pack(padx=16, pady=(14, 4))
+        code_instructions.pack(pady=(0, 2))
 
         self._url_label = ctk.CTkLabel(
             self._code_frame,
@@ -101,38 +168,58 @@ class LoginOverlay(ctk.CTkFrame):
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL, weight="bold"),
             text_color=theme.PRIMARY_RED,
         )
-        self._url_label.pack(padx=16)
+        self._url_label.pack(pady=(0, 14))
+
+        code_box = ctk.CTkFrame(self._code_frame, fg_color=theme.BACKGROUND_LIGHT, corner_radius=theme.CORNER_RADIUS)
+        code_box.pack(fill="x", pady=(0, 10))
 
         self._code_label = ctk.CTkLabel(
-            self._code_frame,
+            code_box,
             text="",
-            font=ctk.CTkFont(family="Consolas", size=26, weight="bold"),
+            font=ctk.CTkFont(family="Consolas", size=24, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
-        self._code_label.pack(padx=16, pady=(6, 4))
+        self._code_label.pack(padx=16, pady=12)
 
         copy_code_button = ctk.CTkButton(
             self._code_frame,
             text="Copiar código",
-            width=140,
-            height=26,
-            fg_color=theme.PRIMARY_RED_LIGHT,
-            text_color=theme.PRIMARY_RED,
-            hover_color=theme.BORDER_LIGHT,
+            width=300,
+            height=32,
+            fg_color="transparent",
+            border_width=1,
+            border_color=theme.BORDER_LIGHT,
+            text_color=theme.TEXT_DARK,
+            hover_color=theme.BACKGROUND_LIGHT,
             command=self._copy_code,
         )
-        copy_code_button.pack(pady=(0, 14))
+        copy_code_button.pack(pady=(0, 12))
+
+        waiting_row = ctk.CTkFrame(self._code_frame, fg_color="transparent")
+        waiting_row.pack()
+        dot = ctk.CTkLabel(
+            waiting_row, text="●", font=ctk.CTkFont(size=8), text_color=theme.PRIMARY_RED
+        )
+        dot.pack(side="left", padx=(0, 6))
+        waiting_label = ctk.CTkLabel(
+            waiting_row,
+            text="Esperando confirmación...",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
+            text_color=theme.TEXT_MUTED,
+        )
+        waiting_label.pack(side="left")
 
         self._status_label = ctk.CTkLabel(
-            container,
+            right_content,
             text="Verificando si ya iniciaste sesión antes..." if is_configured() else
             "⚠️ El login con Microsoft todavía no está configurado (falta el Client ID). "
             "Contacta al administrador del sistema para poder ingresar.",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
             text_color=theme.TEXT_MUTED,
-            wraplength=380,
+            wraplength=320,
+            justify="center",
         )
-        self._status_label.pack(pady=(4, 20))
+        self._status_label.pack(pady=(12, 0))
 
     # ------------------------------------------------------------------ #
     # Login silencioso (sesión de una vez anterior, si existe)
@@ -177,10 +264,11 @@ class LoginOverlay(ctk.CTkFrame):
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_device_code(self, code: str, url: str) -> None:
+        self._login_button.pack_forget()
         self._code_label.configure(text=code)
         self._url_label.configure(text=url)
         self._code_frame.pack(pady=(0, 12))
-        self._status_label.configure(text="Esperando que inicies sesión en el navegador...")
+        self._status_label.configure(text="")
         try:
             webbrowser.open(url)
         except Exception:
@@ -195,6 +283,7 @@ class LoginOverlay(ctk.CTkFrame):
             self._complete(display_name or "Usuario")
         else:
             self._code_frame.pack_forget()
+            self._login_button.pack(pady=(0, 12))
             self._status_label.configure(text=f"⚠️ {message}")
 
     def _copy_code(self) -> None:
