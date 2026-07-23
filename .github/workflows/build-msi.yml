@@ -124,7 +124,7 @@ jobs:
         run: candle.exe -dSourceDir=dist\AsistenteIA -out packaging\wix\obj\ packaging\wix\obj\Product.generated.wxs packaging\wix\Files.wxs
 
       - name: Enlazar con light.exe (genera el .msi)
-        run: light.exe -ext WixUIExtension -ext WixUtilExtension -out dist\AsistenteIA-Setup.msi packaging\wix\obj\Product.generated.wixobj packaging\wix\obj\Files.wixobj
+        run: light.exe -out dist\AsistenteIA-Setup.msi packaging\wix\obj\Product.generated.wixobj packaging\wix\obj\Files.wixobj
 
       - name: Publicar el instalador como artifact descargable
         uses: actions/upload-artifact@v4

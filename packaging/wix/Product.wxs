@@ -47,24 +47,21 @@
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
     <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
 
-    <!-- ==============================================================
-         Interfaz del instalador: Bienvenida -> Licencia -> Carpeta de
-         instalación (con botón "Change..." y "Install") -> Progreso ->
-         Finalizar. Es la secuencia estándar de WixUI_InstallDir, la
-         misma que usan miles de instaladores WiX sin problemas.
-         ============================================================== -->
-    <WixVariable Id="WixUILicenseRtf" Value="packaging/wix/license.rtf" />
-    <UIRef Id="WixUI_InstallDir" />
-    <UIRef Id="WixUI_ErrorProgressText" />
+    <!-- Sin interfaz personalizada: instalación estándar de Windows
+         Installer (progreso + finalizar por defecto). Se probó agregar
+         un asistente con licencia/elegir carpeta (WixUI_InstallDir) y
+         un checkbox de "abrir al finalizar", pero ambas variantes
+         producían el error 2819 en una instalación real, y no se pudo
+         verificar la causa exacta sin acceso a Windows/WiX Toolset real
+         para depurarlo (el entorno de desarrollo solo tiene una
+         reimplementación en Linux que no soporta esa parte de WiX). Se
+         revirtió para no seguir bloqueando la instalación.
 
-    <!-- NOTA: se probó agregar acá un checkbox "Iniciar Asistente IA..."
-         en la pantalla final (vía WIXUI_EXITDIALOGOPTIONALCHECKBOX +
-         un CustomAction WixShellExec), pero causaba el error 2819 al
-         instalar en una máquina real y no se pudo verificar la causa
-         exacta sin acceso a Windows/WiX Toolset real para depurarlo. Se
-         quitó para no seguir bloqueando la instalación; queda pendiente
-         retomarlo más adelante con logs reales
-         (msiexec /i AsistenteIA-Setup.msi /l*v install.log). -->
+         Para retomarlo con una causa real (no adivinada), generar un
+         log detallado de una instalación que falle:
+             msiexec /i AsistenteIA-Setup.msi /l*v install.log
+         y buscar la línea con "2819" — ahí Windows Installer sí anota
+         el Dialog/Control/Property exactos involucrados. -->
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">

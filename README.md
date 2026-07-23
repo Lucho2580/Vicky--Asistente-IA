@@ -458,3 +458,34 @@ y buscar en `install.log` la línea con "2819" — ahí Windows Installer
 sí registra el nombre exacto del Dialog/Control/Property involucrado
 (el popup de error no lo muestra). Con ese dato puntual se puede
 corregir la causa real en vez de adivinar.
+
+## Reversión completa: instalador vuelve a ser simple (sin asistente de diálogos)
+
+El error 2819 seguía apareciendo incluso después de quitar solo el
+checkbox de "abrir al finalizar" — es decir, mi hipótesis de que ese
+era el problema estaba mal. En vez de seguir adivinando y haciendo
+perder tiempo con instalaciones fallidas, se revirtió **todo** lo
+agregado en esta área: ya no hay pantalla de licencia, ni elección de
+carpeta de instalación, ni ninguna personalización de diálogos —
+Windows Installer usa su comportamiento por defecto (progreso simple).
+Es exactamente la misma configuración que funcionaba antes de empezar
+a tocar esto.
+
+**Esta vez la validación es mucho más sólida que en los intentos
+anteriores**: se pudo compilar el `Product.wxs` completo, tal cual
+queda en el repositorio, de punta a punta con herramientas WiX reales
+(`wixl`/`wixl-heat`, la variante para Linux), generando un `.msi`
+real y verificando sus tablas internas (`File`, `Directory`) — antes
+solo se podía validar una versión "recortada a mano" del archivo,
+porque las partes de interfaz personalizada no eran compatibles con
+las herramientas disponibles en este entorno. Sin esas partes, la
+validación ahora es completa y confiable.
+
+Si en algún momento quieren un asistente de instalación con pantallas
+(licencia, elegir carpeta, checkbox de abrir al finalizar), la forma
+correcta de retomarlo es generando un log real de una instalación que
+falle (`msiexec /i AsistenteIA-Setup.msi /l*v install.log`) y
+compartiendo la línea con "2819" de ese log — ahí sí queda anotado el
+Dialog/Control/Property exacto involucrado, algo que el simple popup
+de error no muestra y que no se puede adivinar sin poder correr las
+herramientas de Windows reales.

@@ -81,7 +81,7 @@ Write-Host "== 5) Compilando con candle.exe ==" -ForegroundColor Cyan
 & $candle -dSourceDir="dist\AsistenteIA" -out "$objDir\" "$objDir\Product.generated.wxs" "packaging\wix\Files.wxs"
 
 Write-Host "== 6) Enlazando con light.exe (genera el .msi final) ==" -ForegroundColor Cyan
-& $light -ext WixUIExtension -ext WixUtilExtension -out "dist\AsistenteIA-Setup.msi" "$objDir\Product.generated.wixobj" "$objDir\Files.wixobj"
+& $light -out "dist\AsistenteIA-Setup.msi" "$objDir\Product.generated.wixobj" "$objDir\Files.wixobj"
 
 Write-Host ""
 Write-Host "Listo: dist\AsistenteIA-Setup.msi" -ForegroundColor Green
