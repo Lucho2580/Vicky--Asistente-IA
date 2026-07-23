@@ -113,7 +113,10 @@ class UpdateManager:
 
     def _fetch_from_custom_endpoint(self) -> Optional[UpdateInfo]:
         if not self._endpoint_url:
-            return None
+            raise RuntimeError(
+                "El sistema de actualizaciones no está configurado "
+                "(falta ASISTENTEIA_UPDATE_ENDPOINT en el .env)."
+            )
         if not self._endpoint_url.lower().startswith("https://"):
             # No se descargan/consultan instaladores desde orígenes no HTTPS.
             raise ValueError("El endpoint de actualizaciones debe ser HTTPS.")
@@ -135,7 +138,10 @@ class UpdateManager:
 
     def _fetch_from_github(self) -> Optional[UpdateInfo]:
         if not self._github_repo:
-            return None
+            raise RuntimeError(
+                "El sistema de actualizaciones no está configurado "
+                "(falta ASISTENTEIA_UPDATE_GITHUB_REPO en el .env)."
+            )
 
         if self._channel == "beta":
             url = f"https://api.github.com/repos/{self._github_repo}/releases"

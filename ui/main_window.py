@@ -262,29 +262,49 @@ class MainWindow(ctk.CTk):
             return elapsed.days >= 7
         return elapsed.days >= 1  # "diaria" por defecto
 
-    def _run_update_check(self) -> None:
-        self._update_manager.check_for_updates(self._handle_update_check_result)
+    def _run_update_check(self, manual: bool = False) -> None:
+        self._update_manager.check_for_updates(
+            lambda info, err: self._handle_update_check_result(info, err, manual)
+        )
 
-    def _handle_update_check_result(self, update_info, error) -> None:
+    def _handle_update_check_result(self, update_info, error, manual: bool = False) -> None:
         # check_for_updates() corre en un hilo aparte: hay que volver al
         # hilo principal antes de tocar cualquier widget.
-        self.after(0, lambda: self._apply_update_check_result(update_info, error))
+        self.after(0, lambda: self._apply_update_check_result(update_info, error, manual))
 
-    def _apply_update_check_result(self, update_info, error) -> None:
+    def _apply_update_check_result(self, update_info, error, manual: bool = False) -> None:
         from datetime import datetime
+        from tkinter import messagebox
 
         self._config.update(last_update_check=datetime.now().isoformat(timespec="seconds"))
 
         if error:
-            # Nunca se muestra un error molesto: se registra en logs y
-            # la app sigue funcionando con total normalidad.
+            # Verificación automática (al iniciar): nunca se muestra un
+            # error molesto, se registra en logs y listo. Verificación
+            # MANUAL (el usuario apretó el botón): sí se avisa, porque
+            # quedarse callado ahí se ve como "el botón no hace nada".
             get_logger().warning("Fallo al verificar actualizaciones: %s", error)
+            if manual:
+                messagebox.showerror(
+                    "Buscar actualizaciones",
+                    f"No se pudo verificar si hay una actualización disponible:\n\n{error}",
+                )
             return
 
         if update_info is None:
-            return  # ya está en la última versión: no hacer nada, tal como se pidió
+            if manual:
+                messagebox.showinfo(
+                    "Buscar actualizaciones",
+                    f"Ya tenés instalada la última versión (v{APP_VERSION}).",
+                )
+            return  # ya está en la última versión: no hacer nada más (automática)
 
         if self._update_dialog is not None:
+            if manual:
+                messagebox.showinfo(
+                    "Buscar actualizaciones",
+                    "Ya hay una actualización disponible esperando tu respuesta.",
+                )
             return  # ya hay un diálogo de actualización abierto
 
         self._update_dialog = UpdateDialog(
@@ -298,7 +318,7 @@ class MainWindow(ctk.CTk):
 
     def check_for_updates_now(self) -> None:
         """Disparado manualmente desde Acerca de / Configuración ("Buscar actualizaciones")."""
-        self._run_update_check()
+        self._run_update_check(manual=True)
 
     def _handle_update_remind_later(self) -> None:
         self._update_dialog = None
