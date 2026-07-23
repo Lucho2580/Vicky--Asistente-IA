@@ -405,3 +405,27 @@ placeholder, listo para el próximo build. Se aplicó el mismo fix en
 `packaging/build_msi.ps1` (build local). Verificado con una simulación
 exacta del reemplazo contra el archivo real: encuentra una sola
 coincidencia y el XML resultante es válido.
+
+## Fix: error 2819 al instalar ("dialog control does not support the property")
+
+Error real reportado durante la instalación (no en el build): al
+aceptar la licencia y presionar "Next", Windows Installer mostraba
+`The installer has encountered an unexpected error installing this
+package... The error code is 2819`.
+
+**Causa**: al agregar el checkbox "Iniciar Asistente IA..." en la
+pantalla final, se referenció `<UIRef Id="WixUI_InstallDir" />` pero
+faltó su complemento casi siempre obligatorio, `WixUI_ErrorProgressText`
+— sin él, algunas propiedades de texto que otros diálogos de la
+secuencia (progreso, títulos) esperan encontrar quedan sin definir,
+lo que Windows Installer reporta como un control que "no soporta" una
+propiedad.
+
+**Corrección**: se agregó `<UIRef Id="WixUI_ErrorProgressText" />`
+junto a `WixUI_InstallDir`. También se quitó `-sval` de `light.exe`
+(suprimía TODAS las validaciones internas de WiX): con esa bandera,
+un problema de autoría como este no se detecta en la compilación sino
+recién en la instalación real de un usuario, que es justo lo que pasó
+acá. Sin `-sval`, el próximo build va a fallar rápido y con un mensaje
+claro si queda algún otro problema de este tipo, en vez de generar un
+`.msi` que parece válido pero falla al instalarse.

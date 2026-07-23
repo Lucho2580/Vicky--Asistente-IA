@@ -56,6 +56,12 @@
          ============================================================== -->
     <WixVariable Id="WixUILicenseRtf" Value="packaging/wix/license.rtf" />
     <UIRef Id="WixUI_InstallDir" />
+    <!-- Complemento casi siempre obligatorio junto a cualquier WixUI_*:
+         define propiedades de texto (progreso, título de diálogo, etc.)
+         que otros diálogos de la secuencia esperan encontrar. Omitirlo
+         es una causa conocida del error 2819 en tiempo de instalación
+         ("dialog control does not support the property"). -->
+    <UIRef Id="WixUI_ErrorProgressText" />
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Iniciar Asistente IA - La Vianda" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
