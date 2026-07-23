@@ -31,8 +31,6 @@ exige "Iniciar sesión con Microsoft" (código de dispositivo) — el
 acceso está centralizado en la cuenta de correo de Microsoft, no
 existe una vía para entrar sin loguearse.
 """
-import os
-import sys
 import threading
 import webbrowser
 
@@ -41,21 +39,9 @@ from PIL import Image
 
 from core.microsoft_auth import MicrosoftAuthService, is_configured
 from ui import theme
+from ui.assets_path import get_asset_path
 
-if getattr(sys, "frozen", False):
-    # Compilado con PyInstaller: los assets NO quedan necesariamente
-    # junto al .exe — desde PyInstaller 6, en modo "one-folder" van
-    # adentro de una subcarpeta "_internal". `sys._MEIPASS` es la forma
-    # correcta y estable (funciona igual en onefile y one-folder, en
-    # cualquier versión) de encontrar dónde quedaron los datos
-    # empaquetados — ver packaging/pyinstaller/app.spec, que copia
-    # ui/assets ahí mismo.
-    _BASE_DIR = sys._MEIPASS
-else:
-    # Corriendo desde código fuente: __file__ sí apunta a la ruta real.
-    _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-_LOGO_PATH = os.path.join(_BASE_DIR, "ui", "assets", "logo.png")
+_LOGO_PATH = get_asset_path("logo.png")
 
 LEFT_PANEL_WIDTH = 320
 

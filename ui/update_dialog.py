@@ -7,15 +7,23 @@ notificación puntual y descartable, no una sección de navegación
 permanente, así que tiene sentido que aparezca como un diálogo aparte
 — igual que en VS Code, Discord o Notion.
 
+Diseño: franja superior gris oscura con el logo real (mismo lenguaje
+visual que la pantalla de login), y debajo la comparación de versión
+instalada -> nueva versión con una flecha, en vez de una tabla plana.
+
 No mezcla lógica de actualización: solo llama a `UpdateManager` (que
 ya vive en services/) y muestra su progreso; toda la lógica de
 verificación/descarga/instalación real vive ahí, no acá.
 """
 import customtkinter as ctk
+from PIL import Image
 
 from models.update_info import UpdateInfo
 from services.update_manager import UpdateManager
 from ui import theme
+from ui.assets_path import get_asset_path
+
+_LOGO_PATH = get_asset_path("logo.png")
 
 
 def _format_speed(bytes_per_second: float) -> str:
@@ -49,9 +57,9 @@ class UpdateDialog(ctk.CTkToplevel):
     ):
         super().__init__(master, **kwargs)
         self.title("Actualización disponible")
-        self.geometry("440x520")
-        self.minsize(440, 480)
-        self.configure(fg_color=theme.BACKGROUND_LIGHT)
+        self.geometry("400x560")
+        self.minsize(400, 500)
+        self.configure(fg_color=theme.SURFACE_WHITE)
 
         self._update_manager = update_manager
         self._update_info = update_info
@@ -60,8 +68,30 @@ class UpdateDialog(ctk.CTkToplevel):
         self._on_ready_to_install = on_ready_to_install
         self._cancel_requested = False
 
+        # --- Franja superior fija (no cambia entre la vista de info y la de progreso) ---
+        header = ctk.CTkFrame(self, fg_color=theme.SIDEBAR_BG, corner_radius=0, height=52)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+
+        header_content = ctk.CTkFrame(header, fg_color="transparent")
+        header_content.place(relx=0.5, rely=0.5, anchor="center")
+
+        try:
+            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(22, 22))
+            logo_label = ctk.CTkLabel(header_content, image=logo_image, text="")
+            logo_label.pack(side="left", padx=(0, 8))
+        except Exception:
+            pass  # si el logo no está disponible, se sigue sin él
+
+        ctk.CTkLabel(
+            header_content,
+            text="Nueva versión disponible",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL, weight="bold"),
+            text_color="#FFFFFF",
+        ).pack(side="left")
+
         self._container = ctk.CTkFrame(self, fg_color="transparent")
-        self._container.pack(fill="both", expand=True, padx=24, pady=24)
+        self._container.pack(fill="both", expand=True, padx=24, pady=20)
 
         self._build_info_view()
 
@@ -79,33 +109,54 @@ class UpdateDialog(ctk.CTkToplevel):
     def _build_info_view(self) -> None:
         self._clear_container()
 
-        title = ctk.CTkLabel(
+        # --- Comparación de versión instalada -> nueva, con flecha ---
+        compare_row = ctk.CTkFrame(self._container, fg_color="transparent")
+        compare_row.pack(pady=(4, 2))
+
+        installed_col = ctk.CTkFrame(compare_row, fg_color="transparent")
+        installed_col.pack(side="left", padx=14)
+        ctk.CTkLabel(
+            installed_col, text="Instalada", font=ctk.CTkFont(family=theme.FONT_FAMILY, size=10),
+            text_color=theme.TEXT_MUTED,
+        ).pack()
+        ctk.CTkLabel(
+            installed_col, text=self._current_version,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=17, weight="bold"), text_color=theme.TEXT_DARK,
+        ).pack()
+
+        ctk.CTkLabel(
+            compare_row, text="→", font=ctk.CTkFont(family=theme.FONT_FAMILY, size=18, weight="bold"),
+            text_color=theme.PRIMARY_RED,
+        ).pack(side="left", padx=4)
+
+        new_col = ctk.CTkFrame(compare_row, fg_color="transparent")
+        new_col.pack(side="left", padx=14)
+        ctk.CTkLabel(
+            new_col, text="Nueva", font=ctk.CTkFont(family=theme.FONT_FAMILY, size=10),
+            text_color=theme.STATUS_RED,
+        ).pack()
+        ctk.CTkLabel(
+            new_col, text=self._update_info.version,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=17, weight="bold"), text_color=theme.PRIMARY_RED,
+        ).pack()
+
+        ctk.CTkLabel(
             self._container,
-            text="Nueva versión disponible",
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=18, weight="bold"),
-            text_color=theme.TEXT_DARK,
-        )
-        title.pack(anchor="w", pady=(0, 12))
-
-        info_frame = ctk.CTkFrame(self._container, fg_color=theme.SURFACE_WHITE, corner_radius=theme.CORNER_RADIUS)
-        info_frame.pack(fill="x", pady=(0, 12))
-
-        self._add_info_row(info_frame, "Versión instalada", self._current_version)
-        self._add_info_row(info_frame, "Nueva versión", self._update_info.version)
-        self._add_info_row(info_frame, "Fecha", self._update_info.published or "—")
+            text=f"Publicada el {self._update_info.published}" if self._update_info.published else "",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
+            text_color=theme.TEXT_MUTED,
+        ).pack(pady=(2, 16))
 
         if self._update_info.mandatory:
             mandatory_label = ctk.CTkLabel(
-                info_frame,
+                self._container,
                 text="⚠️ Esta actualización es obligatoria para seguir usando el asistente.",
                 font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL, weight="bold"),
                 text_color=theme.STATUS_RED,
-                wraplength=360,
+                wraplength=340,
                 justify="left",
             )
-            mandatory_label.pack(anchor="w", padx=16, pady=(4, 12))
-        else:
-            ctk.CTkFrame(info_frame, fg_color="transparent", height=8).pack()
+            mandatory_label.pack(pady=(0, 12))
 
         notes_title = ctk.CTkLabel(
             self._container,
@@ -113,9 +164,9 @@ class UpdateDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
-        notes_title.pack(anchor="w", pady=(4, 4))
+        notes_title.pack(anchor="w", pady=(0, 6))
 
-        notes_frame = ctk.CTkScrollableFrame(self._container, fg_color=theme.SURFACE_WHITE, corner_radius=theme.CORNER_RADIUS)
+        notes_frame = ctk.CTkScrollableFrame(self._container, fg_color=theme.BACKGROUND_LIGHT, corner_radius=theme.CORNER_RADIUS)
         notes_frame.pack(fill="both", expand=True, pady=(0, 16))
 
         if self._update_info.release_notes:
@@ -123,9 +174,9 @@ class UpdateDialog(ctk.CTkToplevel):
                 note_label = ctk.CTkLabel(
                     notes_frame,
                     text=f"•  {note}",
-                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
-                    text_color=theme.TEXT_DARK,
-                    wraplength=360,
+                    font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
+                    text_color="#5F5E5A",
+                    wraplength=320,
                     justify="left",
                     anchor="w",
                 )
@@ -145,11 +196,11 @@ class UpdateDialog(ctk.CTkToplevel):
         if not self._update_info.mandatory:
             later_button = ctk.CTkButton(
                 button_row,
-                text="Recordarme más tarde",
+                text="Más tarde",
                 fg_color="transparent",
                 border_width=1,
                 border_color=theme.BORDER_LIGHT,
-                text_color=theme.TEXT_MUTED,
+                text_color=theme.TEXT_DARK,
                 hover_color=theme.BACKGROUND_LIGHT,
                 command=self._handle_remind_later,
             )
@@ -163,20 +214,6 @@ class UpdateDialog(ctk.CTkToplevel):
             command=self._start_download,
         )
         update_button.pack(side="left", fill="x", expand=True)
-
-    def _add_info_row(self, parent, label_text: str, value_text: str) -> None:
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", padx=16, pady=4)
-        label = ctk.CTkLabel(
-            row, text=label_text, font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
-            text_color=theme.TEXT_MUTED, width=140, anchor="w",
-        )
-        label.pack(side="left")
-        value = ctk.CTkLabel(
-            row, text=value_text, font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL, weight="bold"),
-            text_color=theme.TEXT_DARK, anchor="w",
-        )
-        value.pack(side="left")
 
     def _handle_remind_later(self) -> None:
         self.destroy()
@@ -204,7 +241,7 @@ class UpdateDialog(ctk.CTkToplevel):
             text=f"Descargando la versión {self._update_info.version}...",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=16, weight="bold"),
             text_color=theme.TEXT_DARK,
-            wraplength=380,
+            wraplength=340,
         )
         title.pack(anchor="w", pady=(20, 16))
 
@@ -229,13 +266,13 @@ class UpdateDialog(ctk.CTkToplevel):
 
         self._status_label = ctk.CTkLabel(
             self._container, text="", font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
-            text_color=theme.STATUS_RED, wraplength=380, justify="left",
+            text_color=theme.STATUS_RED, wraplength=340, justify="left",
         )
         self._status_label.pack(anchor="w", pady=(0, 12))
 
         self._cancel_button = ctk.CTkButton(
             self._container, text="Cancelar", fg_color="transparent", border_width=1,
-            border_color=theme.BORDER_LIGHT, text_color=theme.TEXT_MUTED, hover_color=theme.BACKGROUND_LIGHT,
+            border_color=theme.BORDER_LIGHT, text_color=theme.TEXT_DARK, hover_color=theme.BACKGROUND_LIGHT,
             command=self._handle_cancel,
         )
         self._cancel_button.pack(fill="x")
