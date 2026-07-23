@@ -45,7 +45,7 @@
              Description="Instalador de Asistente IA - La Vianda"
              Manufacturer="La Vianda" />
 
-    <MajorUpgrade DowngradeErrorMessage="Ya existe una versión más nueva de Asistente IA - La Vianda instalada." />
+    <MajorUpgrade DowngradeErrorMessage="Ya existe una version mas nueva de Asistente IA - La Vianda instalada." />
     <MediaTemplate EmbedCab="yes" />
 
     <Feature Id="ProductFeature" Title="Asistente IA - La Vianda" Level="1">
