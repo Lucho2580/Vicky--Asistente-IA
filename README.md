@@ -381,3 +381,27 @@ explícitamente esas 3 cadenas de error en la salida completa — no
 aparece ninguna. También confirmé que cada escenario corriendo en su
 propio proceso (como ocurre en uso real: `python main.py` arranca un
 único proceso) queda completamente limpio.
+
+## Fix: error CNDL0103 al compilar con candle.exe
+
+Error real que apareció al correr el workflow:
+```
+candle.exe : error CNDL0103 : The system cannot find the file '.0.0.4' with type 'Source'.
+```
+
+**Causa**: pasar la versión del `.msi` como parámetro `-dProductVersion=X.Y.Z.W`
+directo en la línea de comandos de `candle.exe` (vía `${{ env.PRODUCT_VERSION }}`
+en el workflow) hace que `candle.exe` interprete mal el valor cuando
+tiene varios puntos — termina tratando parte del valor como si fuera
+un archivo fuente a compilar.
+
+**Corrección**: en vez de pasar la versión por línea de comandos, el
+workflow ahora **sustituye el placeholder `Version="0.0.0.0"` directo
+dentro de una copia temporal** de `Product.wxs`
+(`packaging/wix/obj/Product.generated.wxs`, generada en cada build, no
+versionada en git) y compila esa copia. El archivo fuente
+`packaging/wix/Product.wxs` nunca se modifica — siempre queda con el
+placeholder, listo para el próximo build. Se aplicó el mismo fix en
+`packaging/build_msi.ps1` (build local). Verificado con una simulación
+exacta del reemplazo contra el archivo real: encuentra una sola
+coincidencia y el XML resultante es válido.

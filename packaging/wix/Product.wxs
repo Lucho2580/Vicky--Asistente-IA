@@ -11,12 +11,21 @@
   IMPORTANTE: UpgradeCode es fijo y NO debe cambiar entre versiones:
   es lo que permite que un instalador nuevo reemplace correctamente
   al anterior en vez de instalarse en paralelo.
+
+  El atributo Version del Product (más abajo, hoy en 0.0.0.0) es un
+  PLACEHOLDER: el workflow de GitHub Actions (y build_msi.ps1 para
+  builds locales) generan una copia temporal de este archivo con la
+  versión real ya sustituida (packaging/wix/obj/Product.generated.wxs)
+  y compilan ESA copia — este archivo fuente nunca se modifica en el
+  repositorio. No se pasa por -d de candle.exe porque esa vía tiene
+  un problema real de parseo de argumentos con candle.exe (ver
+  CNDL0103 en el historial del proyecto).
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
            Name="Asistente IA - La Vianda"
            Language="1033"
-           Version="$(var.ProductVersion)"
+           Version="0.0.0.0"
            Manufacturer="La Vianda"
            UpgradeCode="755C98A5-480D-440E-A7F2-BC176B2DA485">
 

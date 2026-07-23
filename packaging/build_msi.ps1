@@ -69,11 +69,19 @@ New-Item -ItemType Directory -Force -Path $objDir | Out-Null
 Write-Host "== 4) Generando Files.wxs con heat.exe (harvesting de dist\AsistenteIA) ==" -ForegroundColor Cyan
 & $heat dir "dist\AsistenteIA" -o "packaging\wix\Files.wxs" -ag -srd -cg AppFiles -dr INSTALLFOLDER -var var.SourceDir
 
+# La version se sustituye DIRECTO en una copia del .wxs (no se pasa por
+# -d de candle.exe: esa via tiene un bug real de parseo de argumentos
+# con valores tipo "X.Y.Z.W", ver CNDL0103 en el historial del proyecto).
+$productWxsContent = Get-Content "packaging\wix\Product.wxs" -Raw
+$replacement = 'Version="' + $productVersion + '"'
+$productWxsContent = $productWxsContent -replace 'Version="0\.0\.0\.0"', $replacement
+Set-Content -Path "$objDir\Product.generated.wxs" -Value $productWxsContent -Encoding utf8 -NoNewline
+
 Write-Host "== 5) Compilando con candle.exe ==" -ForegroundColor Cyan
-& $candle -dSourceDir="dist\AsistenteIA" -dProductVersion="$productVersion" -out "$objDir\" "packaging\wix\Product.wxs" "packaging\wix\Files.wxs"
+& $candle -dSourceDir="dist\AsistenteIA" -out "$objDir\" "$objDir\Product.generated.wxs" "packaging\wix\Files.wxs"
 
 Write-Host "== 6) Enlazando con light.exe (genera el .msi final) ==" -ForegroundColor Cyan
-& $light -ext WixUIExtension -ext WixUtilExtension -sval -out "dist\AsistenteIA-Setup.msi" "$objDir\Product.wixobj" "$objDir\Files.wixobj"
+& $light -ext WixUIExtension -ext WixUtilExtension -sval -out "dist\AsistenteIA-Setup.msi" "$objDir\Product.generated.wixobj" "$objDir\Files.wixobj"
 
 Write-Host ""
 Write-Host "Listo: dist\AsistenteIA-Setup.msi" -ForegroundColor Green

@@ -59,9 +59,20 @@ jobs:
 
           Write-Host "Version embebida: $version (build $build, fecha $buildDate)"
 
-          # Para el paso de candle.exe (versión del propio .msi, 4 partes numéricas)
+          # Versión del propio .msi (4 partes numéricas, como exige Windows Installer).
+          # IMPORTANTE: esto se sustituye DIRECTO en una copia del .wxs (ver más abajo,
+          # antes de candle.exe), no se pasa como parámetro -d de candle.exe: esa vía
+          # tiene un bug real de parseo de argumentos con valores tipo "X.Y.Z.W"
+          # (CNDL0103, candle.exe interpreta mal el punto final del valor).
           $msiBuildPart = [int]$build % 65535
-          echo "PRODUCT_VERSION=$version.$msiBuildPart" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $productVersion = "$version.$msiBuildPart"
+          Write-Host "Version del .msi: $productVersion"
+
+          New-Item -ItemType Directory -Force -Path "packaging\wix\obj" | Out-Null
+          $productWxsContent = Get-Content "packaging\wix\Product.wxs" -Raw
+          $replacement = 'Version="' + $productVersion + '"'
+          $productWxsContent = $productWxsContent -replace 'Version="0\.0\.0\.0"', $replacement
+          Set-Content -Path "packaging\wix\obj\Product.generated.wxs" -Value $productWxsContent -Encoding utf8 -NoNewline
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -110,10 +121,10 @@ jobs:
         run: heat.exe dir dist\AsistenteIA -o packaging\wix\Files.wxs -ag -srd -cg AppFiles -dr INSTALLFOLDER -var var.SourceDir
 
       - name: Compilar con candle.exe
-        run: candle.exe -dSourceDir=dist\AsistenteIA -dProductVersion=${{ env.PRODUCT_VERSION }} -out packaging\wix\obj\ packaging\wix\Product.wxs packaging\wix\Files.wxs
+        run: candle.exe -dSourceDir=dist\AsistenteIA -out packaging\wix\obj\ packaging\wix\obj\Product.generated.wxs packaging\wix\Files.wxs
 
       - name: Enlazar con light.exe (genera el .msi)
-        run: light.exe -ext WixUIExtension -ext WixUtilExtension -sval -out dist\AsistenteIA-Setup.msi packaging\wix\obj\Product.wixobj packaging\wix\obj\Files.wixobj
+        run: light.exe -ext WixUIExtension -ext WixUtilExtension -sval -out dist\AsistenteIA-Setup.msi packaging\wix\obj\Product.generated.wixobj packaging\wix\obj\Files.wixobj
 
       - name: Publicar el instalador como artifact descargable
         uses: actions/upload-artifact@v4
