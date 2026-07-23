@@ -72,7 +72,7 @@ jobs:
           $productWxsContent = Get-Content "packaging\wix\Product.wxs" -Raw
           $replacement = 'Version="' + $productVersion + '"'
           $productWxsContent = $productWxsContent -replace 'Version="0\.0\.0\.0"', $replacement
-          Set-Content -Path "packaging\wix\obj\Product.generated.wxs" -Value $productWxsContent -Encoding utf8 -NoNewline
+          Set-Content -Path "packaging\wix\obj\Product.generated.wxs" -Value $productWxsContent -Encoding utf8BOM -NoNewline
 
       - name: Configurar Python
         uses: actions/setup-python@v5

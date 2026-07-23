@@ -75,7 +75,7 @@ Write-Host "== 4) Generando Files.wxs con heat.exe (harvesting de dist\Asistente
 $productWxsContent = Get-Content "packaging\wix\Product.wxs" -Raw
 $replacement = 'Version="' + $productVersion + '"'
 $productWxsContent = $productWxsContent -replace 'Version="0\.0\.0\.0"', $replacement
-Set-Content -Path "$objDir\Product.generated.wxs" -Value $productWxsContent -Encoding utf8 -NoNewline
+Set-Content -Path "$objDir\Product.generated.wxs" -Value $productWxsContent -Encoding utf8BOM -NoNewline
 
 Write-Host "== 5) Compilando con candle.exe ==" -ForegroundColor Cyan
 & $candle -dSourceDir="dist\AsistenteIA" -out "$objDir\" "$objDir\Product.generated.wxs" "packaging\wix\Files.wxs"

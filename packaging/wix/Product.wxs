@@ -1,7 +1,17 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <!--
   Definición del instalador MSI para "Asistente IA - La Vianda",
   usando WiX Toolset v3 (candle.exe + light.exe).
+
+  IMPORTANTE - CODIFICACIÓN: este archivo debe guardarse como UTF-8
+  CON BOM (marca de orden de bytes, los 3 bytes EF BB BF al inicio).
+  Sin el BOM, candle.exe puede no detectar correctamente que el
+  archivo es UTF-8 pese a decirlo en la cabecera XML, y termina
+  interpretando mal los caracteres acentuados ("versión", "más", etc.)
+  — eso produce el error LGHT0311 ("characters that are not available
+  in the specified database code page") al enlazar con light.exe. Si
+  editás este archivo con un editor que no preserva el BOM (algunos lo
+  quitan al guardar), hay que volver a agregarlo.
 
   Este archivo describe el producto, sus carpetas de instalación y sus
   accesos directos. La lista real de archivos a instalar (el contenido
