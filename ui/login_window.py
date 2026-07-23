@@ -57,9 +57,7 @@ else:
 
 _LOGO_PATH = os.path.join(_BASE_DIR, "ui", "assets", "logo.png")
 
-CARD_WIDTH = 640
-CARD_HEIGHT = 420
-LEFT_PANEL_WIDTH = 240
+LEFT_PANEL_WIDTH = 320
 
 
 class LoginOverlay(ctk.CTkFrame):
@@ -77,28 +75,17 @@ class LoginOverlay(ctk.CTkFrame):
         self.after(200, self._try_silent_login)
 
     def _build_ui(self) -> None:
-        # Tarjeta centrada (panel dividido), flotando sobre el fondo neutro.
-        card = ctk.CTkFrame(
-            self,
-            width=CARD_WIDTH,
-            height=CARD_HEIGHT,
-            fg_color=theme.SURFACE_WHITE,
-            corner_radius=theme.CORNER_RADIUS,
-            border_width=1,
-            border_color=theme.BORDER_LIGHT,
-        )
-        card.place(relx=0.5, rely=0.5, anchor="center")
-        card.pack_propagate(False)
-        card.grid_propagate(False)
-        card.grid_columnconfigure(1, weight=1)
-        card.grid_rowconfigure(0, weight=1)
+        # Panel dividido a pantalla completa (ocupa toda la ventana, sin
+        # tarjeta flotante ni espacio vacío alrededor).
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
         # ------------------------------------------------------------ #
         # Panel izquierdo: fijo, gris oscuro corporativo, logo real.
         # No cambia entre el paso del botón y el paso del código.
         # ------------------------------------------------------------ #
         left_panel = ctk.CTkFrame(
-            card, width=LEFT_PANEL_WIDTH, fg_color=theme.SIDEBAR_BG, corner_radius=0
+            self, width=LEFT_PANEL_WIDTH, fg_color=theme.SIDEBAR_BG, corner_radius=0
         )
         left_panel.grid(row=0, column=0, sticky="nsew")
         left_panel.grid_propagate(False)
@@ -107,16 +94,16 @@ class LoginOverlay(ctk.CTkFrame):
         logo_container.place(relx=0.5, rely=0.5, anchor="center")
 
         try:
-            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(72, 72))
+            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(96, 96))
             logo_label = ctk.CTkLabel(logo_container, image=logo_image, text="")
-            logo_label.pack(pady=(0, 14))
+            logo_label.pack(pady=(0, 18))
         except Exception:
             pass  # si el archivo del logo no está disponible, se sigue sin él
 
         brand_label = ctk.CTkLabel(
             logo_container,
             text="Vicky\nConsulting",
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=17, weight="bold"),
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=22, weight="bold"),
             text_color="#FFFFFF",
             justify="center",
         )
@@ -125,8 +112,8 @@ class LoginOverlay(ctk.CTkFrame):
         # ------------------------------------------------------------ #
         # Panel derecho: cambia de contenido según el paso (botón <-> código).
         # ------------------------------------------------------------ #
-        self._right_panel = ctk.CTkFrame(card, fg_color="transparent")
-        self._right_panel.grid(row=0, column=1, sticky="nsew", padx=36, pady=32)
+        self._right_panel = ctk.CTkFrame(self, fg_color=theme.SURFACE_WHITE, corner_radius=0)
+        self._right_panel.grid(row=0, column=1, sticky="nsew")
 
         right_content = ctk.CTkFrame(self._right_panel, fg_color="transparent")
         right_content.place(relx=0.5, rely=0.5, anchor="center")
