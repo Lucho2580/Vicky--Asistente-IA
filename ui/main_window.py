@@ -195,12 +195,10 @@ class MainWindow(ctk.CTk):
         )
         self.settings_page = SettingsPage(
             self.content_container,
-            on_theme_change=self._apply_theme,
             on_db_connection_change=self._handle_db_connection_result,
             knowledge_base=self._knowledge_base,
             qa_log_service=self._qa_log_service,
             connection_log_service=self._connection_log_service,
-            on_check_updates_now=self.check_for_updates_now,
         )
         self.help_page = HelpPage(self.content_container)
         self.about_page = AboutPage(
@@ -231,36 +229,11 @@ class MainWindow(ctk.CTk):
 
     # ------------------------------------------------------------------ #
     # Actualizaciones: CheckForUpdates() en segundo plano al iniciar,
-    # respetando la configuración (auto-verificar, buscar al iniciar,
-    # frecuencia) — nunca bloquea la interfaz ni impide usar la app.
+    # SIEMPRE (cada vez que se abre la app) — nunca bloquea la interfaz
+    # ni impide usar la app si falla o no hay conexión.
     # ------------------------------------------------------------------ #
     def _maybe_check_for_updates_on_startup(self) -> None:
-        settings = self._config.settings
-        if not settings.auto_check_updates or not settings.check_updates_on_startup:
-            return
-        if not self._should_check_updates_now(settings.last_update_check, settings.update_frequency):
-            return
         self.after(1500, self._run_update_check)  # pequeño delay: no compite con el arranque de la UI
-
-    @staticmethod
-    def _should_check_updates_now(last_check_iso: str, frequency: str) -> bool:
-        """Respeta la frecuencia elegida: diaria/semanal/manual (manual = nunca automático)."""
-        if frequency == "manual":
-            return False
-        if not last_check_iso:
-            return True
-
-        from datetime import datetime
-
-        try:
-            last_check = datetime.fromisoformat(last_check_iso)
-        except ValueError:
-            return True
-
-        elapsed = datetime.now() - last_check
-        if frequency == "semanal":
-            return elapsed.days >= 7
-        return elapsed.days >= 1  # "diaria" por defecto
 
     def _run_update_check(self, manual: bool = False) -> None:
         self._update_manager.check_for_updates(
@@ -495,12 +468,6 @@ class MainWindow(ctk.CTk):
             self._active_conversation_id, confirmation_text
         )
         self.chat_panel.add_message(message)
-
-    # ------------------------------------------------------------------ #
-    # Tema
-    # ------------------------------------------------------------------ #
-    def _apply_theme(self, theme_mode: str) -> None:
-        ctk.set_appearance_mode(theme_mode)
 
     def _handle_db_connection_result(self, connected: bool, message: str) -> None:
         """Se llama desde la tarjeta de Base de Datos en Configuración."""

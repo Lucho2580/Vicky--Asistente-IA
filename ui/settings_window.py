@@ -6,8 +6,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from config.app_config import AppConfig
-from core.paths import CONVERSATIONS_DB_PATH, LOGS_DIR, TRAINING_DIR
-from core.version import APP_BUILD, APP_VERSION, BUILD_DATE
+from core.paths import TRAINING_DIR
 from database.sqlserver import SQLServerCredentials, SQLServerDatabase
 from services.knowledge_base import UnsupportedFileTypeError
 from ui import theme
@@ -60,6 +59,17 @@ class Card(ctk.CTkFrame):
         )
         label.pack(side="left")
 
+        if widget_cls is ctk.CTkOptionMenu:
+            # customtkinter usa su tema azul por defecto para estos
+            # colores si no se especifican — se fuerza el rojo
+            # corporativo para que no quede un desplegable azul suelto.
+            widget_kwargs.setdefault("fg_color", theme.PRIMARY_RED)
+            widget_kwargs.setdefault("button_color", theme.PRIMARY_RED_HOVER)
+            widget_kwargs.setdefault("button_hover_color", theme.PRIMARY_RED)
+            widget_kwargs.setdefault("dropdown_fg_color", theme.SURFACE_WHITE)
+            widget_kwargs.setdefault("dropdown_text_color", theme.TEXT_DARK)
+            widget_kwargs.setdefault("dropdown_hover_color", theme.BACKGROUND_LIGHT)
+
         widget = widget_cls(row, **widget_kwargs)
         widget.pack(side="left", fill="x", expand=True)
         return widget
@@ -74,27 +84,20 @@ class SettingsPage(ctk.CTkScrollableFrame):
     def __init__(
         self,
         master,
-        on_theme_change=None,
         on_db_connection_change=None,
         knowledge_base=None,
         qa_log_service=None,
         connection_log_service=None,
-        on_check_updates_now=None,
         **kwargs,
     ):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
         self._config = AppConfig()
-        self._on_theme_change = on_theme_change
         self._on_db_connection_change = on_db_connection_change
         self._knowledge_base = knowledge_base
         self._qa_log_service = qa_log_service
         self._connection_log_service = connection_log_service
-        self._on_check_updates_now = on_check_updates_now
         self._build_database_card()
         self._build_knowledge_base_card()
-        self._build_updates_card()
-        self._build_appearance_card()
-        self._build_system_card()
 
     # ------------------------------------------------------------------ #
     # Tarjeta: BASE DE DATOS
@@ -183,7 +186,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
             "Archivos de entrenamiento con persistencia real, e historial de "
             "conexiones y de preguntas/respuestas, para consultar con el tiempo.",
         )
-        card.pack(fill="x", padx=24, pady=12)
+        card.pack(fill="x", padx=24, pady=(12, 24))
 
         # --- Carpeta "Training": el usuario coloca archivos ahí directamente,
         # sin tener que subirlos uno por uno desde la app ---
@@ -474,177 +477,13 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self.qa_log_box.configure(state="disabled")
 
     # ------------------------------------------------------------------ #
-    # Tarjeta: ACTUALIZACIONES
-    # ------------------------------------------------------------------ #
-    def _build_updates_card(self) -> None:
-        settings = self._config.settings
-        card = Card(
-            self,
-            "ACTUALIZACIONES",
-            "Controla cómo y cuándo se busca una nueva versión del asistente.",
-        )
-        card.pack(fill="x", padx=24, pady=12)
-
-        self._auto_check_switch = ctk.CTkSwitch(
-            card, text="Buscar actualizaciones automáticamente", progress_color=theme.PRIMARY_RED,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
-        )
-        if settings.auto_check_updates:
-            self._auto_check_switch.select()
-        self._auto_check_switch.pack(anchor="w", padx=20, pady=(0, 8))
-
-        self._check_on_startup_switch = ctk.CTkSwitch(
-            card, text="Buscar al iniciar la aplicación", progress_color=theme.PRIMARY_RED,
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
-        )
-        if settings.check_updates_on_startup:
-            self._check_on_startup_switch.select()
-        self._check_on_startup_switch.pack(anchor="w", padx=20, pady=(0, 12))
-
-        channel_map = {"estable": "Estable", "beta": "Beta"}
-        self._update_channel_var = ctk.StringVar(value=channel_map.get(settings.update_channel, "Estable"))
-        channel_row = ctk.CTkFrame(card, fg_color="transparent")
-        channel_row.pack(fill="x", padx=20, pady=(0, 6))
-        ctk.CTkLabel(
-            channel_row, text="Canal:", font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
-            text_color=theme.TEXT_MUTED, width=140, anchor="w",
-        ).pack(side="left")
-        for label in ["Estable", "Beta"]:
-            ctk.CTkRadioButton(
-                channel_row, text=label, value=label, variable=self._update_channel_var, fg_color=theme.PRIMARY_RED,
-            ).pack(side="left", padx=(0, 16))
-
-        self._update_frequency_menu = card.add_field(
-            "Frecuencia", ctk.CTkOptionMenu, values=["Diaria", "Semanal", "Manual"]
-        )
-        frequency_map = {"diaria": "Diaria", "semanal": "Semanal", "manual": "Manual"}
-        self._update_frequency_menu.set(frequency_map.get(settings.update_frequency, "Diaria"))
-
-        last_check_text = settings.last_update_check[:16].replace("T", " ") if settings.last_update_check else "Nunca"
-        self._last_check_label = ctk.CTkLabel(
-            card, text=f"Última verificación: {last_check_text}",
-            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=9), text_color=theme.TEXT_MUTED,
-        )
-        self._last_check_label.pack(anchor="w", padx=20, pady=(4, 8))
-
-        check_now_button = ctk.CTkButton(
-            card, text="Buscar actualizaciones ahora", corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_RED, hover_color=theme.PRIMARY_RED_HOVER,
-            command=self._handle_check_updates_now,
-        )
-        check_now_button.pack(anchor="w", padx=20, pady=(0, 4))
-        card.add_footer_spacer()
-
-    def _handle_check_updates_now(self) -> None:
-        if self._on_check_updates_now:
-            self._on_check_updates_now()
-
-    # ------------------------------------------------------------------ #
-    # Tarjeta: APARIENCIA
-    # ------------------------------------------------------------------ #
-    def _build_appearance_card(self) -> None:
-        settings = self._config.settings
-        card = Card(self, "APARIENCIA", "Personaliza cómo se ve la aplicación.")
-        card.pack(fill="x", padx=24, pady=12)
-
-        theme_map = {"light": "Claro", "dark": "Oscuro", "auto": "Automático"}
-        self._theme_var = ctk.StringVar(value=theme_map.get(settings.theme, "Claro"))
-        radio_row = ctk.CTkFrame(card, fg_color="transparent")
-        radio_row.pack(fill="x", padx=20, pady=(0, 6))
-        for label in ["Claro", "Oscuro", "Automático"]:
-            ctk.CTkRadioButton(
-                radio_row,
-                text=label,
-                value=label,
-                variable=self._theme_var,
-                fg_color=theme.PRIMARY_RED,
-                command=self._apply_theme_now,
-            ).pack(side="left", padx=(0, 16))
-
-        self.scale_menu = card.add_field(
-            "Escala de interfaz", ctk.CTkOptionMenu, values=["80%", "90%", "100%", "110%", "120%"]
-        )
-        self.scale_menu.set(settings.ui_scale)
-
-        self.language_menu = card.add_field(
-            "Idioma", ctk.CTkOptionMenu, values=["Español", "English"]
-        )
-        self.language_menu.set("Español" if settings.language == "es" else "English")
-        card.add_footer_spacer()
-
-    def _apply_theme_now(self) -> None:
-        label_to_mode = {"Claro": "light", "Oscuro": "dark", "Automático": "system"}
-        mode = label_to_mode.get(self._theme_var.get(), "light")
-        ctk.set_appearance_mode(mode)
-        if self._on_theme_change:
-            self._on_theme_change(mode)
-
-    # ------------------------------------------------------------------ #
-    # Tarjeta: SISTEMA
-    # ------------------------------------------------------------------ #
-    def _build_system_card(self) -> None:
-        card = Card(self, "SISTEMA", "Información de la instalación y accesos rápidos.")
-        card.pack(fill="x", padx=24, pady=(12, 24))
-
-        version_entry = card.add_field("Versión", ctk.CTkEntry)
-        version_entry.insert(0, APP_VERSION)
-        version_entry.configure(state="disabled")
-
-        logs_entry = card.add_field("Ruta de logs", ctk.CTkEntry)
-        logs_entry.insert(0, str(LOGS_DIR))
-        logs_entry.configure(state="disabled")
-
-        conversations_entry = card.add_field("Carpeta de conversaciones", ctk.CTkEntry)
-        conversations_entry.insert(0, str(CONVERSATIONS_DB_PATH.parent))
-        conversations_entry.configure(state="disabled")
-
-        button_row = ctk.CTkFrame(card, fg_color="transparent")
-        button_row.pack(fill="x", padx=20, pady=(8, 4))
-
-        open_button = ctk.CTkButton(
-            button_row,
-            text="Abrir carpeta",
-            corner_radius=theme.CORNER_RADIUS,
-            fg_color=theme.PRIMARY_RED,
-            hover_color=theme.PRIMARY_RED_HOVER,
-            command=self._open_conversations_folder,
-        )
-        open_button.pack(side="left")
-        card.add_footer_spacer()
-
-    def _open_conversations_folder(self) -> None:
-        folder = CONVERSATIONS_DB_PATH.parent
-        folder.mkdir(parents=True, exist_ok=True)
-        try:
-            if sys.platform.startswith("win"):
-                os.startfile(folder)  # type: ignore[attr-defined]
-            elif sys.platform == "darwin":
-                subprocess.run(["open", str(folder)], check=False)
-            else:
-                subprocess.run(["xdg-open", str(folder)], check=False)
-        except Exception:
-            # Si no hay gestor de archivos disponible (ej. entorno de pruebas
-            # sin escritorio), se ignora silenciosamente: no es un error crítico.
-            pass
-
-    # ------------------------------------------------------------------ #
     # Guardado (se llama al salir de la página, ver MainWindow)
     # ------------------------------------------------------------------ #
     def save(self) -> None:
-        label_to_theme = {"Claro": "light", "Oscuro": "dark", "Automático": "auto"}
-        channel_label_to_value = {"Estable": "estable", "Beta": "beta"}
-        frequency_label_to_value = {"Diaria": "diaria", "Semanal": "semanal", "Manual": "manual"}
         self._config.update(
             db_server=self.db_server_entry.get(),
             db_name=self.db_name_entry.get(),
             db_user=self.db_user_entry.get(),
             db_password=self.db_password_entry.get(),
             connection_string=self.db_connection_string_entry.get(),
-            theme=label_to_theme.get(self._theme_var.get(), "light"),
-            ui_scale=self.scale_menu.get(),
-            language="es" if self.language_menu.get() == "Español" else "en",
-            auto_check_updates=bool(self._auto_check_switch.get()),
-            check_updates_on_startup=bool(self._check_on_startup_switch.get()),
-            update_channel=channel_label_to_value.get(self._update_channel_var.get(), "estable"),
-            update_frequency=frequency_label_to_value.get(self._update_frequency_menu.get(), "diaria"),
         )
