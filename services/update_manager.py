@@ -178,6 +178,34 @@ class UpdateManager:
         )
         download_url = msi_asset["browser_download_url"] if msi_asset else ""
 
+        # GitHub Releases no tiene campos nativos para checksum ni firma
+        # digital, así que se usa una convención simple: subir, en el
+        # MISMO release, un archivo de texto chico con el mismo nombre
+        # del .msi más una extensión (".sha256" / ".sig"). Se acepta
+        # también la variante con ".txt" de más al final (ej.
+        # "...msi.sha256.txt"), porque es un error muy común: el Bloc de
+        # notas de Windows agrega ".txt" solo si no se pone el nombre
+        # entre comillas al guardar. Si no están esos assets, quedan en
+        # None y el sistema de updates cae al comportamiento fail-closed
+        # normal (ver _verify_integrity): no instala sin poder verificar.
+        checksum_sha256 = None
+        signature = None
+        if msi_asset:
+            base_name = msi_asset["name"]
+            raw_checksum = self._fetch_companion_asset_text(
+                release, [f"{base_name}.sha256", f"{base_name}.sha256.txt"]
+            )
+            if raw_checksum:
+                # Acepta tanto un hash solo como el formato "hash  nombre_archivo"
+                # que genera `sha256sum`/`Get-FileHash` al redirigir a un archivo.
+                checksum_sha256 = raw_checksum.split()[0].strip().lower()
+
+            raw_signature = self._fetch_companion_asset_text(
+                release, [f"{base_name}.sig", f"{base_name}.sig.txt"]
+            )
+            if raw_signature:
+                signature = raw_signature.strip()
+
         body = release.get("body") or ""
         release_notes = [line.strip("- ").strip() for line in body.splitlines() if line.strip()]
 
@@ -188,8 +216,38 @@ class UpdateManager:
             release_notes=release_notes,
             published=release.get("published_at", "")[:10],
             mandatory=False,  # GitHub Releases no tiene este campo nativo
-            checksum_sha256=None,
+            checksum_sha256=checksum_sha256,
+            signature=signature,
         )
+
+    @staticmethod
+    def _fetch_companion_asset_text(release: dict, candidate_names: list) -> Optional[str]:
+        """
+        Busca, entre los assets del mismo release, el primero cuyo
+        nombre coincida (sin distinguir mayúsculas/minúsculas) con
+        alguno de `candidate_names` — en orden de prioridad — y
+        devuelve su contenido como texto. Devuelve None si no
+        encuentra ninguno o si falla la descarga — el llamador ya sabe
+        tratar "no hay checksum/firma" como una razón legítima para no
+        instalar (fail-closed), no como un error que haya que mostrar
+        aparte.
+        """
+        candidates_lower = [name.lower() for name in candidate_names]
+        assets_by_lower_name = {a.get("name", "").lower(): a for a in release.get("assets", [])}
+
+        companion = next(
+            (assets_by_lower_name[name] for name in candidates_lower if name in assets_by_lower_name),
+            None,
+        )
+        if not companion:
+            return None
+
+        try:
+            request = urllib.request.Request(companion["browser_download_url"], method="GET")
+            with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:
+                return response.read().decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 - sin este acompañante, se sigue igual (ver docstring)
+            return None
 
     # ------------------------------------------------------------------ #
     # 2) Descargar el instalador (con progreso, velocidad, cancelación)
