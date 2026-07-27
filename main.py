@@ -12,10 +12,17 @@ otra en el mismo proceso).
 Se mantiene mínimo a propósito: toda la lógica vive en los paquetes
 ui/, ai/, database/, models/ y config/.
 """
+from core.env_config import consume_and_scrub_embedded_ai_api_key
 from ui.main_window import MainWindow
 
 
 def main() -> None:
+    # Reduce la ventana de exposición de la API Key embebida por el
+    # instalador (ver core/env_config.py para el detalle): tiene que
+    # correr ANTES de que cualquier otra cosa (AppConfig, proveedores
+    # de IA) lea la configuración.
+    consume_and_scrub_embedded_ai_api_key()
+
     app = MainWindow()  # sin display_name: muestra el login dentro de la misma ventana
     app.mainloop()
 

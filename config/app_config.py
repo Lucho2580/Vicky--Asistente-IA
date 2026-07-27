@@ -10,6 +10,7 @@ from core.env_config import (
     get_update_source_from_env,
 )
 from core.paths import SETTINGS_PATH
+from core.secure_settings import SECRET_FIELDS, get_secret, is_secure_storage_available, set_secret
 
 
 @dataclass
@@ -58,12 +59,59 @@ class AppConfig:
                 raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
                 settings = AppSettings(**{**asdict(AppSettings()), **raw})
             except (json.JSONDecodeError, TypeError):
+                raw = {}
                 settings = AppSettings()
         else:
+            raw = {}
             settings = AppSettings()
 
+        needs_migration = self._apply_secure_secrets(settings, raw)
         self._apply_env_overrides(settings)
+
+        if needs_migration:
+            # Había secretos en texto plano en el JSON (instalación
+            # previa a este cambio, o el llavero no estaba disponible
+            # en un guardado anterior): se acaban de migrar al llavero
+            # seguro dentro de `_apply_secure_secrets`. Se guarda de
+            # inmediato para limpiar el texto plano del disco ya
+            # mismo, en vez de esperar a que el usuario abra
+            # Configuración.
+            self._settings = settings
+            self.save()
+
         return settings
+
+    @staticmethod
+    def _apply_secure_secrets(settings: AppSettings, raw: dict) -> bool:
+        """
+        Para cada campo secreto: si hay un valor en el llavero seguro,
+        ese manda (fuente de verdad). Si no, pero el JSON en disco
+        trae un valor en texto plano (instalación anterior a este
+        cambio), se conserva ese valor para no perder la
+        configuración y se intenta migrar al llavero ahora mismo.
+
+        Retorna True si hubo algún secreto en texto plano que migrar
+        (para que `_load` dispare un `save()` inmediato y lo borre del
+        JSON).
+        """
+        found_plaintext_to_migrate = False
+        for field in SECRET_FIELDS:
+            secure_value = get_secret(field)
+            if secure_value:
+                setattr(settings, field, secure_value)
+                continue
+
+            plaintext_value = raw.get(field, "")
+            if plaintext_value:
+                if set_secret(field, plaintext_value):
+                    found_plaintext_to_migrate = True
+                # Si set_secret devuelve False (sin llavero disponible
+                # en este equipo), `plaintext_value` ya quedó en
+                # `settings` por el merge de arriba: se sigue
+                # funcionando en modo de respaldo (texto plano), igual
+                # que antes de este cambio.
+
+        return found_plaintext_to_migrate
 
     @staticmethod
     def _apply_env_overrides(settings: AppSettings) -> None:
@@ -107,8 +155,21 @@ class AppConfig:
 
     def save(self) -> None:
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        data = asdict(self._settings)
+
+        for field in SECRET_FIELDS:
+            value = data[field]
+            stored_securely = set_secret(field, value)
+            if stored_securely:
+                # El valor real vive en el llavero del SO: no se
+                # duplica en texto plano en el JSON.
+                data[field] = ""
+            # Si no hay llavero disponible, `data[field]` se deja tal
+            # cual (texto plano) para no perder la configuración —
+            # mismo comportamiento que antes de este cambio.
+
         SETTINGS_PATH.write_text(
-            json.dumps(asdict(self._settings), indent=4, ensure_ascii=False),
+            json.dumps(data, indent=4, ensure_ascii=False),
             encoding="utf-8",
         )
 
@@ -118,3 +179,14 @@ class AppConfig:
             if hasattr(self._settings, key):
                 setattr(self._settings, key, value)
         self.save()
+
+    @property
+    def secure_storage_available(self) -> bool:
+        """
+        True si las credenciales se están cifrando en el llavero real
+        del sistema operativo. False si este equipo no tiene un
+        backend de llavero disponible y se está usando el respaldo en
+        texto plano (la UI de Configuración puede usar esto para
+        avisarle al usuario).
+        """
+        return is_secure_storage_available()

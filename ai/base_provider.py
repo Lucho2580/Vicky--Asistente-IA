@@ -10,16 +10,86 @@ como un mensaje de diagnóstico legible para mostrar en la interfaz.
 que tienen una API de chat pública (OpenAI, GitHub Models, Gemini):
 hace una petición real y devuelve el texto de la respuesta, o lanza
 una excepción con el motivo si algo falla.
+
+SALVAGUARDA DE GASTO (mitigación temporal, ver `RateLimiter` más abajo)
+------------------------------------------------------------------------
+Hoy la API Key de IA se distribuye embebida (vía .env) en todas las
+instalaciones de la app, en texto plano. Mientras se implementa el
+proxy backend propio (que evita que el cliente tenga la key), esta
+clase aplica un límite local de solicitudes por minuto/día como
+salvaguarda adicional: no evita que alguien extraiga la key del
+instalador y la use fuera de la app, pero sí acota el gasto que puede
+generarse *desde la app misma* (bucles, mal uso accidental, un usuario
+individual abusando del asistente). La protección real y completa
+sigue siendo configurar límites de gasto/alcance en el panel del
+proveedor (ver `core/rate_limit_config.py`).
 """
 import json
 import socket
+import time
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
+from collections import deque
 from typing import Any, Callable, Optional, Tuple
 
 DEFAULT_TIMEOUT_SECONDS = 6
 CHAT_TIMEOUT_SECONDS = 30  # las respuestas de chat tardan más que un simple ping
+
+
+class RateLimitExceededError(RuntimeError):
+    """
+    Se alcanzó el límite local de solicitudes configurado como
+    salvaguarda de gasto (ver docstring del módulo). No es un error de
+    red ni del proveedor: es una barrera puesta a propósito por esta
+    aplicación.
+    """
+
+
+class RateLimiter:
+    """
+    Ventanas deslizantes simples (minuto + día) para acotar cuántas
+    solicitudes puede hacer esta instancia de la app a un proveedor de
+    IA. En memoria de proceso (no persiste entre reinicios): es una
+    salvaguarda contra bucles y mal uso en una sesión, no un control de
+    cuota estricto de nivel servidor — eso solo el proveedor puede
+    garantizarlo (ver `core/rate_limit_config.py`).
+    """
+
+    def __init__(self, max_per_minute: int, max_per_day: int) -> None:
+        self._max_per_minute = max_per_minute
+        self._max_per_day = max_per_day
+        self._minute_window: deque = deque()
+        self._day_window: deque = deque()
+
+    def check_and_record(self) -> None:
+        """
+        Lanza `RateLimitExceededError` si ya se alcanzó algún límite;
+        si no, registra esta solicitud y deja pasar.
+        """
+        now = time.time()
+        self._prune(self._minute_window, now, 60)
+        self._prune(self._day_window, now, 86400)
+
+        if self._max_per_minute and len(self._minute_window) >= self._max_per_minute:
+            raise RateLimitExceededError(
+                f"Se alcanzó el límite de {self._max_per_minute} solicitudes por minuto "
+                "configurado como salvaguarda de gasto. Esperá un momento y reintentá."
+            )
+        if self._max_per_day and len(self._day_window) >= self._max_per_day:
+            raise RateLimitExceededError(
+                f"Se alcanzó el límite diario de {self._max_per_day} solicitudes "
+                "configurado como salvaguarda de gasto. Se restablece mañana, o "
+                "un administrador puede ajustarlo en Configuración."
+            )
+
+        self._minute_window.append(now)
+        self._day_window.append(now)
+
+    @staticmethod
+    def _prune(window: deque, now: float, horizon_seconds: int) -> None:
+        while window and (now - window[0]) > horizon_seconds:
+            window.popleft()
 
 
 class AIProvider(ABC):
@@ -31,6 +101,29 @@ class AIProvider(ABC):
         self._connected = False
         self._endpoint = ""
         self._api_key = ""
+        self._rate_limiter = RateLimiter(*self._load_rate_limits())
+
+    @staticmethod
+    def _load_rate_limits() -> Tuple[int, int]:
+        """
+        Lee los límites configurados (por admin, vía Configuración o
+        .env). Import perezoso para evitar un ciclo de imports (
+        `config.app_config` no depende de `ai`, pero se prefiere no
+        importarlo a nivel de módulo en un paquete de bajo nivel como
+        `ai/`).
+        """
+        from core.rate_limit_config import get_max_requests_per_day, get_max_requests_per_minute
+
+        return get_max_requests_per_minute(), get_max_requests_per_day()
+
+    def _enforce_rate_limit(self) -> None:
+        """
+        Cada proveedor concreto llama a esto al principio de
+        `send_message()`/`send_message_stream()`, antes de gastar un
+        solo token real. Lanza `RateLimitExceededError` si corresponde
+        (ver `RateLimiter` arriba).
+        """
+        self._rate_limiter.check_and_record()
 
     @abstractmethod
     def connect(self, endpoint: str = "", api_key: str = "") -> Tuple[bool, str]:

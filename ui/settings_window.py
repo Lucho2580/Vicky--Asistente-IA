@@ -104,7 +104,13 @@ class SettingsPage(ctk.CTkScrollableFrame):
     # ------------------------------------------------------------------ #
     def _build_database_card(self) -> None:
         settings = self._config.settings
-        card = Card(self, "BASE DE DATOS", "Datos de conexión al servidor SQL Server corporativo de La Vianda.")
+        description = "Datos de conexión al servidor SQL Server corporativo de La Vianda."
+        if not self._config.secure_storage_available:
+            description += (
+                " ⚠️ Este equipo no tiene un llavero seguro del sistema disponible: "
+                "la contraseña se guarda como respaldo en un archivo local, no cifrada."
+            )
+        card = Card(self, "BASE DE DATOS", description)
         card.pack(fill="x", padx=24, pady=12)
 
         self.db_server_entry = card.add_field("Servidor", ctk.CTkEntry)

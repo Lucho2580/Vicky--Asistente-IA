@@ -33,11 +33,23 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from core.semver import is_newer
+from core.update_security import SignatureVerificationError, signing_enabled, verify_installer_signature
 from core.version import APP_BUILD, APP_VERSION
 from models.update_info import UpdateInfo
 
 DEFAULT_TIMEOUT_SECONDS = 10
 DOWNLOAD_CHUNK_SIZE = 65536  # 64 KB por lectura, para poder reportar progreso real
+
+
+class UpdateIntegrityError(Exception):
+    """
+    El instalador descargado no pudo verificarse como íntegro/auténtico.
+
+    Política fail-closed: si esta excepción se levanta, el archivo
+    descargado se borra y NO se instala bajo ninguna circunstancia,
+    incluso si el usuario insiste — la UI solo puede mostrar el error y
+    sugerir reintentar o contactar al administrador.
+    """
 
 
 class UpdateManager:
@@ -236,13 +248,12 @@ class UpdateManager:
                     on_complete(False, None, f"Tamaño incompleto: se esperaban {total_bytes} bytes, llegaron {downloaded}.")
                     return
 
-                # Validar integridad (si el servidor publicó un checksum).
-                if update_info.checksum_sha256:
-                    actual_checksum = self._compute_sha256(tmp_path)
-                    if actual_checksum.lower() != update_info.checksum_sha256.lower():
-                        Path(tmp_path).unlink(missing_ok=True)
-                        on_complete(False, None, "El archivo descargado no coincide con el checksum esperado (posible corrupción).")
-                        return
+                try:
+                    self._verify_integrity(tmp_path, update_info)
+                except UpdateIntegrityError as exc:
+                    Path(tmp_path).unlink(missing_ok=True)
+                    on_complete(False, None, str(exc))
+                    return
 
                 on_complete(True, tmp_path, None)
 
@@ -258,6 +269,50 @@ class UpdateManager:
             for chunk in iter(lambda: f.read(DOWNLOAD_CHUNK_SIZE), b""):
                 sha256.update(chunk)
         return sha256.hexdigest()
+
+    @classmethod
+    def _verify_integrity(cls, tmp_path: str, update_info: UpdateInfo) -> None:
+        """
+        Política de verificación en cascada, fail-closed:
+
+        1. Si esta build tiene una clave pública de firmado configurada
+           (`core/update_security.py`), la firma es OBLIGATORIA y debe
+           ser válida. Esta es la única defensa real contra un
+           endpoint de actualizaciones comprometido (ver docstring de
+           `core/update_security.py` para el porqué).
+        2. Si no hay clave de firmado configurada en esta build, se
+           exige como mínimo el checksum SHA-256 (protege contra
+           corrupción en la descarga, no contra manipulación
+           deliberada del servidor).
+        3. Si no hay NINGUNA verificación disponible (ni firma ni
+           checksum), se rechaza la instalación: preferimos negarnos a
+           actualizar antes que instalar un binario sin verificar.
+
+        Lanza `UpdateIntegrityError` con un mensaje legible para
+        mostrar en la UI si cualquier verificación falla.
+        """
+        if signing_enabled():
+            try:
+                verify_installer_signature(tmp_path, update_info.signature)
+            except SignatureVerificationError as exc:
+                raise UpdateIntegrityError(f"Verificación de firma fallida: {exc}") from exc
+            return  # firma válida: es suficiente, no hace falta degradar a checksum
+
+        if update_info.checksum_sha256:
+            actual_checksum = cls._compute_sha256(tmp_path)
+            if actual_checksum.lower() != update_info.checksum_sha256.strip().lower():
+                raise UpdateIntegrityError(
+                    "El archivo descargado no coincide con el checksum esperado "
+                    "(posible corrupción o manipulación). No se instalará."
+                )
+            return
+
+        raise UpdateIntegrityError(
+            "No se pudo verificar la integridad del instalador: el servidor de "
+            "actualizaciones no publicó ni firma digital ni checksum SHA-256. "
+            "Por seguridad, no se instalará. Contactá al administrador del "
+            "sistema de actualizaciones."
+        )
 
     # ------------------------------------------------------------------ #
     # 3) Instalar y reiniciar

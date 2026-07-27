@@ -1,4 +1,6 @@
 import os
+import stat
+import sys
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
@@ -61,6 +63,23 @@ class MicrosoftAuthService:
         if self._token_cache is not None and self._token_cache.has_state_changed:
             TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             TOKEN_CACHE_PATH.write_text(self._token_cache.serialize(), encoding="utf-8")
+            self._restrict_permissions(TOKEN_CACHE_PATH)
+
+    @staticmethod
+    def _restrict_permissions(path: Path) -> None:
+        """
+        El archivo contiene un token de sesión real de Microsoft: se
+        restringe a que solo el usuario propietario pueda leerlo o
+        escribirlo (0600). En Windows esto no aplica (el modelo de
+        permisos es distinto y ya protege el perfil de usuario por
+        defecto), así que se hace solo en macOS/Linux.
+        """
+        if sys.platform.startswith("win"):
+            return
+        try:
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass  # sistema de archivos que no soporta esto (ej. algunos NAS): no es crítico
 
     # ------------------------------------------------------------------ #
     # Login silencioso (usa la sesión guardada de una vez anterior)

@@ -44,6 +44,7 @@ class OpenAIProvider(AIProvider):
     def send_message(self, message: str, system_prompt: Optional[str] = None) -> str:
         if not self.is_connected():
             raise RuntimeError("OpenAI no está conectado. Prueba la conexión en Configuración.")
+        self._enforce_rate_limit()
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -76,6 +77,7 @@ class OpenAIProvider(AIProvider):
     ) -> str:
         if not self.is_connected():
             raise RuntimeError("OpenAI no está conectado. Prueba la conexión en Configuración.")
+        self._enforce_rate_limit()
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",

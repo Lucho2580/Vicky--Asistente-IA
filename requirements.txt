@@ -14,5 +14,15 @@ msal>=1.30
 # prueba de conectividad de red (socket). La app funciona en ambos casos.
 # pyodbc
 
+# Verificación de firma digital de actualizaciones (Ed25519).
+# Ver core/update_security.py. Sin esto, el sistema de updates degrada
+# a exigir checksum SHA-256 como mínimo (nunca instala sin verificar).
+cryptography>=42.0
+
+# Almacenamiento seguro de credenciales (API keys, contraseña de BD)
+# en el llavero nativo del SO: Windows Credential Manager / macOS
+# Keychain / Secret Service (Linux), en vez de texto plano en disco.
+keyring>=25.0
+
 # Calidad / desarrollo
 pytest>=8.0

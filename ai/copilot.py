@@ -56,6 +56,7 @@ class GitHubCopilotProvider(AIProvider):
     def send_message(self, message: str, system_prompt: Optional[str] = None) -> str:
         if not self.is_connected():
             raise RuntimeError("GitHub Copilot no está conectado. Prueba la conexión en Configuración.")
+        self._enforce_rate_limit()
 
         url = self._resolve_url(self._endpoint)
         headers = self._build_headers()
@@ -86,6 +87,7 @@ class GitHubCopilotProvider(AIProvider):
     ) -> str:
         if not self.is_connected():
             raise RuntimeError("GitHub Copilot no está conectado. Prueba la conexión en Configuración.")
+        self._enforce_rate_limit()
 
         url = self._resolve_url(self._endpoint)
         headers = self._build_headers()

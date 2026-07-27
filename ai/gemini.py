@@ -5,10 +5,15 @@ Proveedor de IA: Google Gemini.
 `send_message()` usa el endpoint `generateContent` del modelo
 `gemini-1.5-flash` para obtener una respuesta real. Ambas son
 peticiones HTTP reales, sin simulaciones.
+
+SEGURIDAD: la API Key se envía en el header `x-goog-api-key` (soportado
+oficialmente por la API de Gemini), NUNCA en el query string de la URL.
+Una key en la URL queda expuesta en logs de proxies, balanceadores,
+CDNs y servidores intermedios por los que pasa la petición; un header
+no se registra por defecto en ese tipo de logs.
 """
 import json
 from typing import Callable, Optional, Tuple
-from urllib.parse import quote
 
 from ai.base_provider import CHAT_TIMEOUT_SECONDS, AIProvider
 
@@ -30,9 +35,7 @@ class GeminiProvider(AIProvider):
         self._api_key = api_key.strip()
 
         base_url = self._endpoint or MODELS_ENDPOINT
-        url = f"{base_url}?key={quote(self._api_key)}"
-
-        status, _body, error = self._http_get(url, headers={})
+        status, _body, error = self._http_get(base_url, headers=self._auth_headers())
 
         if status == 200:
             self._connected = True
@@ -44,12 +47,15 @@ class GeminiProvider(AIProvider):
     def send_message(self, message: str, system_prompt: Optional[str] = None) -> str:
         if not self.is_connected():
             raise RuntimeError("Gemini no está conectado. Prueba la conexión en Configuración.")
+        self._enforce_rate_limit()
 
         base_url = self._endpoint or MODELS_ENDPOINT
-        url = f"{base_url}/{DEFAULT_MODEL}:generateContent?key={quote(self._api_key)}"
+        url = f"{base_url}/{DEFAULT_MODEL}:generateContent"
         payload = self._build_payload(message, system_prompt)
 
-        status, body, error = self._http_post(url, headers={}, json_body=payload, timeout=CHAT_TIMEOUT_SECONDS)
+        status, body, error = self._http_post(
+            url, headers=self._auth_headers(), json_body=payload, timeout=CHAT_TIMEOUT_SECONDS
+        )
 
         if status != 200:
             self._connected = False
@@ -70,12 +76,14 @@ class GeminiProvider(AIProvider):
     ) -> str:
         if not self.is_connected():
             raise RuntimeError("Gemini no está conectado. Prueba la conexión en Configuración.")
+        self._enforce_rate_limit()
 
         base_url = self._endpoint or MODELS_ENDPOINT
         # alt=sse hace que Gemini transmita la respuesta como Server-Sent
         # Events (igual formato de líneas "data: {...}" que OpenAI), en
-        # vez de devolver todo junto al final.
-        url = f"{base_url}/{DEFAULT_MODEL}:streamGenerateContent?alt=sse&key={quote(self._api_key)}"
+        # vez de devolver todo junto al final. La key ya no va acá: ver
+        # _auth_headers().
+        url = f"{base_url}/{DEFAULT_MODEL}:streamGenerateContent?alt=sse"
         payload = self._build_payload(message, system_prompt)
 
         collected: list[str] = []
@@ -96,7 +104,12 @@ class GeminiProvider(AIProvider):
                 on_token(text)
 
         status, error = self._http_post_stream(
-            url, headers={}, json_body=payload, on_line=handle_line, should_stop=should_stop, timeout=CHAT_TIMEOUT_SECONDS
+            url,
+            headers=self._auth_headers(),
+            json_body=payload,
+            on_line=handle_line,
+            should_stop=should_stop,
+            timeout=CHAT_TIMEOUT_SECONDS,
         )
 
         if status != 200:
@@ -104,6 +117,10 @@ class GeminiProvider(AIProvider):
             raise RuntimeError(self._describe_error(status, error))
 
         return "".join(collected)
+
+    def _auth_headers(self) -> dict:
+        """API Key vía header (recomendado por Google), nunca en la URL."""
+        return {"x-goog-api-key": self._api_key}
 
     @staticmethod
     def _build_payload(message: str, system_prompt: Optional[str]) -> dict:
