@@ -308,7 +308,20 @@ class TypingIndicator(ctk.CTkFrame):
 # Caja de entrada de texto (siempre visible, incluso en el Home)
 # ---------------------------------------------------------------------- #
 class ChatInputBar(ctk.CTkFrame):
-    """Caja inferior de composición de mensajes."""
+    """
+    Caja inferior de composición de mensajes.
+
+    Adjuntar un archivo (📎) ya NO lo sube a la Base de Conocimiento en
+    el momento de elegirlo: solo lo deja "pendiente" (se ve como un
+    chip arriba del cuadro de texto, con opción de quitarlo). El
+    archivo recién se usa cuando el usuario efectivamente presiona
+    Enviar — y en ese punto se usa como contexto para responder ESA
+    pregunta puntual, no como conocimiento permanente (ver
+    `services/knowledge_base.read_ephemeral_attachment`).
+    """
+
+    _MIN_HEIGHT = 44   # altura para 1 línea (igual que antes, sin cambios visuales en reposo)
+    _MAX_HEIGHT = 160  # a partir de acá, sigue creciendo el contenido pero con scroll interno
 
     def __init__(self, master, on_send=None, on_stop=None, on_attach=None, **kwargs):
         super().__init__(master, fg_color=theme.SURFACE_WHITE, corner_radius=0, **kwargs)
@@ -316,48 +329,84 @@ class ChatInputBar(ctk.CTkFrame):
         self._on_stop = on_stop
         self._on_attach = on_attach
         self._is_generating = False
+        self._pending_attachment_path: str | None = None
+        self._current_height = self._MIN_HEIGHT
         self._build_ui()
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(1, weight=1)
 
+        # Chip del archivo adjuntado pendiente (oculto hasta que haya uno).
+        self.attachment_chip = ctk.CTkFrame(
+            self, fg_color=theme.BACKGROUND_LIGHT, corner_radius=theme.CORNER_RADIUS
+        )
+        self.attachment_label = ctk.CTkLabel(
+            self.attachment_chip,
+            text="",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
+            text_color=theme.TEXT_DARK,
+        )
+        self.attachment_label.pack(side="left", padx=(10, 4), pady=6)
+        self.attachment_remove_button = ctk.CTkButton(
+            self.attachment_chip,
+            text="✕",
+            width=22,
+            height=22,
+            fg_color="transparent",
+            hover_color=theme.PRIMARY_RED_LIGHT,
+            text_color=theme.TEXT_MUTED,
+            command=self.clear_pending_attachment,
+        )
+        self.attachment_remove_button.pack(side="left", padx=(0, 8), pady=6)
+        # No se hace .grid() todavía: se muestra recién en set_pending_attachment().
+
         self.attach_button = ctk.CTkButton(
             self,
             text="📎",
-            width=36,
+            width=44,
+            height=40,
+            corner_radius=theme.CORNER_RADIUS,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=17),
             fg_color="transparent",
             hover_color=theme.PRIMARY_RED_LIGHT,
             text_color=theme.TEXT_MUTED,
             command=self._attach_file,
         )
-        self.attach_button.grid(row=0, column=0, padx=(12, 4), pady=10)
+        self.attach_button.grid(row=1, column=0, padx=(12, 4), pady=10)
 
         self.text_entry = ctk.CTkTextbox(
             self,
-            height=44,
+            height=self._MIN_HEIGHT,
             corner_radius=theme.CORNER_RADIUS,
             fg_color=theme.BACKGROUND_LIGHT,
             border_width=1,
             border_color=theme.BORDER_LIGHT,
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
+            wrap="word",
         )
-        self.text_entry.grid(row=0, column=1, padx=4, pady=10, sticky="ew")
+        self.text_entry.grid(row=1, column=1, padx=4, pady=10, sticky="ew")
         self._set_placeholder()
         self.text_entry.bind("<FocusIn>", self._clear_placeholder)
         self.text_entry.bind("<KeyRelease>", self._on_key_release)
         self.text_entry.bind("<Return>", self._handle_return)
         self.text_entry.bind("<Shift-Return>", lambda e: None)  # deja el salto de línea normal
 
+        # Botón de chat de voz (🎤) — deshabilitado hasta que se implemente
+        # (ver Sidebar: "Próximamente"). Mismo tamaño que el de adjuntar
+        # para que ambos tengan presencia visual similar en la barra.
         self.dictate_button = ctk.CTkButton(
             self,
             text="🎤",
-            width=36,
+            width=44,
+            height=40,
+            corner_radius=theme.CORNER_RADIUS,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=17),
             fg_color="transparent",
             hover_color=theme.SURFACE_WHITE,
             text_color=theme.SIDEBAR_TEXT_DISABLED,
             state="disabled",
         )
-        self.dictate_button.grid(row=0, column=2, padx=4, pady=10)
+        self.dictate_button.grid(row=1, column=2, padx=4, pady=10)
 
         self.send_button = ctk.CTkButton(
             self,
@@ -368,7 +417,7 @@ class ChatInputBar(ctk.CTkFrame):
             hover_color=theme.PRIMARY_RED_HOVER,
             command=self._handle_send_or_stop,
         )
-        self.send_button.grid(row=0, column=3, padx=(4, 12), pady=10)
+        self.send_button.grid(row=1, column=3, padx=(4, 12), pady=10)
 
     # ------------------------------------------------------------------ #
     # Placeholder manual (CTkTextbox no soporta placeholder nativo)
@@ -387,7 +436,36 @@ class ChatInputBar(ctk.CTkFrame):
             self._showing_placeholder = False
 
     def _on_key_release(self, _event=None) -> None:
-        pass
+        self._autosize_input()
+
+    # ------------------------------------------------------------------ #
+    # Auto-crecimiento del cuadro de texto (como ChatGPT): arranca en 1
+    # línea y va agrandándose con el contenido, hasta un máximo — pasado
+    # ese máximo, sigue funcionando pero con scroll interno en vez de
+    # seguir creciendo indefinidamente.
+    # ------------------------------------------------------------------ #
+    def _autosize_input(self) -> None:
+        if getattr(self, "_showing_placeholder", False):
+            self._set_input_height(self._MIN_HEIGHT)
+            return
+
+        try:
+            display_lines = self.text_entry._textbox.count("1.0", "end", "displaylines")[0]
+            line_info = self.text_entry._textbox.dlineinfo("1.0")
+            line_height = line_info[3] if line_info else 17
+        except Exception:
+            return  # cualquier fallo acá no debe romper la escritura/envío de mensajes
+
+        # Espacio fijo (bordes + padding interno) que ya está incluido en
+        # _MIN_HEIGHT para 1 sola línea; se mantiene constante al crecer.
+        chrome_padding = self._MIN_HEIGHT - line_height
+        target_height = line_height * max(display_lines, 1) + chrome_padding
+        self._set_input_height(max(self._MIN_HEIGHT, min(target_height, self._MAX_HEIGHT)))
+
+    def _set_input_height(self, height: int) -> None:
+        if height != self._current_height:
+            self._current_height = height
+            self.text_entry.configure(height=height)
 
     def _handle_return(self, event) -> str:
         # Enter envía, Shift+Enter (manejado arriba) permite salto de línea.
@@ -403,13 +481,36 @@ class ChatInputBar(ctk.CTkFrame):
         text = self.text_entry.get("1.0", "end").strip()
         if not text or getattr(self, "_showing_placeholder", False):
             return
-        self.text_entry.delete("1.0", "end")
-        if self._on_send:
-            self._on_send(text)
 
+        attachment_path = self._pending_attachment_path
+        self.text_entry.delete("1.0", "end")
+        self._set_input_height(self._MIN_HEIGHT)
+        self.clear_pending_attachment()
+
+        if self._on_send:
+            self._on_send(text, attachment_path)
+
+    # ------------------------------------------------------------------ #
+    # Adjunto pendiente (elegido, todavía no enviado)
+    # ------------------------------------------------------------------ #
     def _attach_file(self) -> None:
         if self._on_attach:
             self._on_attach()
+
+    def set_pending_attachment(self, file_path: str, display_name: str) -> None:
+        """
+        Llamado por MainWindow después de que el usuario elige un
+        archivo válido en el diálogo: solo lo muestra como "pendiente"
+        (chip arriba del input). No se lee ni se procesa todavía —
+        eso pasa recién al presionar Enviar.
+        """
+        self._pending_attachment_path = file_path
+        self.attachment_label.configure(text=f"📎 {display_name}")
+        self.attachment_chip.grid(row=0, column=0, columnspan=4, padx=12, pady=(8, 0), sticky="w")
+
+    def clear_pending_attachment(self) -> None:
+        self._pending_attachment_path = None
+        self.attachment_chip.grid_forget()
 
     # ------------------------------------------------------------------ #
     # Control de estado mientras la IA responde
@@ -594,9 +695,9 @@ class ChatPanel(ctk.CTkFrame):
     # ------------------------------------------------------------------ #
     # Callbacks internos
     # ------------------------------------------------------------------ #
-    def _handle_user_message(self, text: str) -> None:
+    def _handle_user_message(self, text: str, attachment_path: str | None = None) -> None:
         if self._on_send_message:
-            self._on_send_message(text)
+            self._on_send_message(text, attachment_path)
 
     def _handle_stop_requested(self) -> None:
         if self._on_stop_generation:

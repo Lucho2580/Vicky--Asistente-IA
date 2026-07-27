@@ -62,6 +62,12 @@ class KnowledgeBase:
         """
         Sube un archivo real de disco a la Base de Conocimiento: lee su
         contenido de texto y lo persiste en knowledge.db.
+
+        Esto es para documentos de referencia PERMANENTES (ej. un
+        procedimiento que se va a consultar en preguntas futuras). Si
+        el usuario está adjuntando un archivo puntual a una pregunta
+        del chat (ej. "resumime esto"), usar `read_ephemeral_attachment`
+        en su lugar — ver ahí el porqué de la distinción.
         """
         path = Path(file_path)
         if not path.exists():
@@ -84,6 +90,43 @@ class KnowledgeBase:
             size_bytes=size_bytes,
             content_text=content,
         )
+
+    def read_ephemeral_attachment(self, file_path: str) -> "tuple[str, str]":
+        """
+        Lee el contenido de un archivo adjuntado a UNA pregunta puntual
+        del chat (ej. "resumime este documento"), sin persistirlo en la
+        Base de Conocimiento.
+
+        Antes, adjuntar cualquier archivo desde el chat lo agregaba de
+        inmediato a `training_files` (permanente, buscable en
+        preguntas futuras) — mezclaba dos cosas distintas: "acá tenés
+        un documento para responder ESTA pregunta" y "este es un
+        procedimiento de referencia que quiero que quede guardado para
+        siempre". Esta función es para lo primero: el contenido se lee
+        y se devuelve para usarlo como contexto de UNA respuesta, y no
+        queda guardado en ningún lado después de eso. Para lo segundo
+        (documentos de referencia permanentes) seguís teniendo
+        `add_document` y la carpeta "Training".
+
+        Retorna (nombre_de_archivo, contenido_de_texto). Lanza las
+        mismas excepciones que `add_document` (`FileNotFoundError`,
+        `UnsupportedFileTypeError`) para que el llamador las maneje
+        igual.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"No se encontró el archivo: {file_path}")
+
+        extension = path.suffix.lower()
+        if extension not in SUPPORTED_TEXT_EXTENSIONS:
+            supported = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
+            raise UnsupportedFileTypeError(
+                f"Tipo de archivo '{extension or 'sin extensión'}' no soportado todavía. "
+                f"Por ahora se aceptan: {supported} (PDF/Word quedan para una próxima iteración)."
+            )
+
+        content = path.read_text(encoding="utf-8", errors="replace")[:MAX_CONTENT_LENGTH]
+        return path.name, content
 
     def list_documents(self) -> List[TrainingFile]:
         return self._store.list_training_files()

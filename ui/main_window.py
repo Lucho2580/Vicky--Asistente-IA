@@ -1,5 +1,6 @@
 import threading
-from tkinter import filedialog
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
@@ -12,7 +13,12 @@ from database.knowledge_store import KnowledgeStore
 from models.message import Message, Sender
 from services.connection_log_service import ConnectionLogService
 from services.conversation_service import ConversationService
-from services.knowledge_base import KnowledgeBase, UnsupportedFileTypeError, friendly_name
+from services.knowledge_base import (
+    SUPPORTED_TEXT_EXTENSIONS,
+    KnowledgeBase,
+    UnsupportedFileTypeError,
+    friendly_name,
+)
 from services.qa_log_service import QALogService
 from services.update_manager import UpdateManager
 from ui import theme
@@ -434,12 +440,13 @@ class MainWindow(ctk.CTk):
         self.sidebar.select("history")
 
     # ------------------------------------------------------------------ #
-    # Adjuntar archivo (sube el documento a la Base de Conocimiento, con
-    # persistencia real en knowledge.db, para usarlo luego como contexto)
+    # Adjuntar archivo (queda PENDIENTE hasta que se presione Enviar; ver
+    # _handle_user_message para dónde se lee y se usa como contexto de
+    # esa pregunta puntual — no se persiste en la Base de Conocimiento)
     # ------------------------------------------------------------------ #
     def _handle_attach_file(self) -> None:
         file_path = filedialog.askopenfilename(
-            title="Adjuntar archivo de entrenamiento",
+            title="Adjuntar archivo",
             filetypes=[
                 ("Archivos de texto", "*.txt *.md *.csv *.json *.log"),
                 ("Todos los archivos", "*.*"),
@@ -448,26 +455,22 @@ class MainWindow(ctk.CTk):
         if not file_path:
             return  # el usuario canceló el diálogo
 
-        if self._active_conversation_id is None:
-            conversation = self._conversation_service.start_new_conversation()
-            self._active_conversation_id = conversation.id
-            self.chat_panel.start_new_conversation()
-
-        try:
-            training_file = self._knowledge_base.add_document(file_path)
-            confirmation_text = (
-                f"📎 Archivo «{training_file.filename}» agregado a la Base de Conocimiento "
-                f"({training_file.size_bytes} bytes). Se usará como contexto en próximas preguntas."
+        # Se valida el tipo de archivo ACÁ (antes de mostrarlo como
+        # "pendiente"), para avisar de inmediato si no es soportado, en
+        # vez de dejar que el usuario escriba su pregunta y recién
+        # enterarse del error al presionar Enviar.
+        extension = Path(file_path).suffix.lower()
+        if extension not in SUPPORTED_TEXT_EXTENSIONS:
+            supported = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
+            messagebox.showwarning(
+                "Archivo no soportado",
+                f"Tipo de archivo '{extension or 'sin extensión'}' no soportado todavía.\n\n"
+                f"Por ahora se aceptan: {supported}",
+                parent=self,
             )
-        except UnsupportedFileTypeError as exc:
-            confirmation_text = f"⚠️ No se pudo adjuntar el archivo: {exc}"
-        except Exception as exc:  # noqa: BLE001 - cualquier error de lectura se informa, no se cae la app
-            confirmation_text = f"⚠️ No se pudo adjuntar el archivo: {exc}"
+            return
 
-        message = self._conversation_service.add_assistant_message(
-            self._active_conversation_id, confirmation_text
-        )
-        self.chat_panel.add_message(message)
+        self.chat_panel.input_bar.set_pending_attachment(file_path, Path(file_path).name)
 
     def _handle_db_connection_result(self, connected: bool, message: str) -> None:
         """Se llama desde la tarjeta de Base de Datos en Configuración."""
@@ -477,7 +480,7 @@ class MainWindow(ctk.CTk):
     # Envío de mensajes (con persistencia real en SQLite y respuesta real
     # del proveedor de IA cuando hay uno conectado)
     # ------------------------------------------------------------------ #
-    def _handle_user_message(self, text: str) -> None:
+    def _handle_user_message(self, text: str, attachment_path: str | None = None) -> None:
         if self._active_conversation_id is None:
             # Red de seguridad: si por algún motivo no hay conversación activa
             # (por ejemplo, se escribió desde Inicio), se crea una al vuelo.
@@ -487,8 +490,44 @@ class MainWindow(ctk.CTk):
         message = self._conversation_service.add_user_message(self._active_conversation_id, text)
         self.chat_panel.add_message(message)
 
+        attachment_context = ""
+        if attachment_path:
+            attachment_context = self._consume_pending_attachment(attachment_path)
+
         self._stop_requested = False
-        self._dispatch_ai_response(text)
+        self._dispatch_ai_response(text, extra_context=attachment_context)
+
+    def _consume_pending_attachment(self, attachment_path: str) -> str:
+        """
+        Lee el archivo que el usuario adjuntó a ESTE mensaje (elegido
+        antes de presionar Enviar, ver ChatInputBar.set_pending_attachment)
+        y lo devuelve como texto de contexto para responder esta
+        pregunta puntual.
+
+        A diferencia de la Base de Conocimiento (`add_document`), esto
+        NO se persiste en knowledge.db: el archivo no queda disponible
+        para preguntas futuras, ni buscable, ni aparece en "Base de
+        Conocimiento" de Configuración — es contexto de una sola vez,
+        para esta respuesta.
+        """
+        try:
+            filename, content = self._knowledge_base.read_ephemeral_attachment(attachment_path)
+        except (UnsupportedFileTypeError, FileNotFoundError, OSError) as exc:
+            note = self._conversation_service.add_assistant_message(
+                self._active_conversation_id, f"⚠️ No se pudo adjuntar el archivo: {exc}"
+            )
+            self.chat_panel.add_message(note)
+            return ""
+
+        note = self._conversation_service.add_assistant_message(
+            self._active_conversation_id,
+            f"📎 Archivo «{filename}» adjuntado a este mensaje (se usa solo para responder esta "
+            f"pregunta; no se guarda en la Base de Conocimiento).",
+        )
+        self.chat_panel.add_message(note)
+
+        max_chars = 4000
+        return f"--- Contenido de {filename} (adjuntado a este mensaje) ---\n{content[:max_chars]}"
 
     def _handle_regenerate_message(self, question: str) -> None:
         """
@@ -502,19 +541,26 @@ class MainWindow(ctk.CTk):
         self._stop_requested = False
         self._dispatch_ai_response(question)
 
-    def _dispatch_ai_response(self, question: str) -> None:
+    def _dispatch_ai_response(self, question: str, extra_context: str = "") -> None:
         """
         Lógica compartida entre un mensaje nuevo y un "Regenerar": busca
         contexto en la Base de Conocimiento, detecta ambigüedad, y llama
         al proveedor real (streaming) o al camino sin conexión.
+
+        `extra_context`, si se pasa, es contenido adjuntado a ESTA
+        pregunta puntual (ver `_consume_pending_attachment`) — se suma
+        al contexto de la Base de Conocimiento, pero no proviene de ahí
+        ni queda guardado para preguntas futuras.
         """
         # Antes de generar/consultar la IA: si la pregunta es ambigua entre
         # dos o más procedimientos de la Base de Conocimiento (ej. "cambiar
         # la contraseña" podría ser la del correo o la de Zeus), se pregunta
         # primero a cuál se refiere, en vez de mezclar el contexto de
-        # documentos que no tienen que ver entre sí.
+        # documentos que no tienen que ver entre sí. Un archivo adjuntado a
+        # esta pregunta puntual (extra_context) ya deja la intención clara,
+        # así que en ese caso no tiene sentido pedir aclaración.
         scored_matches = self._knowledge_base.search_with_scores(question)
-        if scored_matches:
+        if scored_matches and not extra_context:
             top_score = scored_matches[0][0]
             threshold = top_score * 0.85
             candidates = [doc for score, doc in scored_matches if score >= threshold]
@@ -530,11 +576,12 @@ class MainWindow(ctk.CTk):
 
         matches = candidates
         source_filenames = ", ".join(m.filename for m in matches)
-        context = self._knowledge_base.build_context_snippet(matches)
+        kb_context = self._knowledge_base.build_context_snippet(matches)
+        combined_context = "\n\n".join(part for part in (kb_context, extra_context) if part)
         augmented_text = (
-            f"Usa el siguiente contexto de los archivos de entrenamiento si es relevante:\n"
-            f"{context}\n\nPregunta del usuario: {question}"
-            if context
+            f"Usa el siguiente contexto si es relevante:\n"
+            f"{combined_context}\n\nPregunta del usuario: {question}"
+            if combined_context
             else question
         )
 

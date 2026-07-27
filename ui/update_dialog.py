@@ -109,6 +109,41 @@ class UpdateDialog(ctk.CTkToplevel):
     def _build_info_view(self) -> None:
         self._clear_container()
 
+        # IMPORTANTE: los botones se empacan PRIMERO, con side="bottom",
+        # para que Tkinter les reserve su espacio natural (siempre
+        # visibles, nunca cortados) antes de repartir lo que sobra entre
+        # el resto del contenido. Antes se empacaban al final: si había
+        # muchas notas de versión o el aviso de "obligatoria" ocupaba
+        # varias líneas, el contenido de arriba se comía el espacio de
+        # los botones y quedaban recortados en la parte inferior de la
+        # ventana.
+        button_row = ctk.CTkFrame(self._container, fg_color="transparent")
+        button_row.pack(side="bottom", fill="x", pady=(12, 0))
+
+        if not self._update_info.mandatory:
+            later_button = ctk.CTkButton(
+                button_row,
+                text="Más tarde",
+                height=38,
+                fg_color="transparent",
+                border_width=1,
+                border_color=theme.BORDER_LIGHT,
+                text_color=theme.TEXT_DARK,
+                hover_color=theme.BACKGROUND_LIGHT,
+                command=self._handle_remind_later,
+            )
+            later_button.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        update_button = ctk.CTkButton(
+            button_row,
+            text="Actualizar ahora",
+            height=38,
+            fg_color=theme.PRIMARY_RED,
+            hover_color=theme.PRIMARY_RED_HOVER,
+            command=self._start_download,
+        )
+        update_button.pack(side="left", fill="x", expand=True)
+
         # --- Comparación de versión instalada -> nueva, con flecha ---
         compare_row = ctk.CTkFrame(self._container, fg_color="transparent")
         compare_row.pack(pady=(4, 2))
@@ -189,31 +224,6 @@ class UpdateDialog(ctk.CTkToplevel):
                 text_color=theme.TEXT_MUTED,
             )
             empty_label.pack(padx=12, pady=8)
-
-        button_row = ctk.CTkFrame(self._container, fg_color="transparent")
-        button_row.pack(fill="x")
-
-        if not self._update_info.mandatory:
-            later_button = ctk.CTkButton(
-                button_row,
-                text="Más tarde",
-                fg_color="transparent",
-                border_width=1,
-                border_color=theme.BORDER_LIGHT,
-                text_color=theme.TEXT_DARK,
-                hover_color=theme.BACKGROUND_LIGHT,
-                command=self._handle_remind_later,
-            )
-            later_button.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-        update_button = ctk.CTkButton(
-            button_row,
-            text="Actualizar ahora",
-            fg_color=theme.PRIMARY_RED,
-            hover_color=theme.PRIMARY_RED_HOVER,
-            command=self._start_download,
-        )
-        update_button.pack(side="left", fill="x", expand=True)
 
     def _handle_remind_later(self) -> None:
         self.destroy()
