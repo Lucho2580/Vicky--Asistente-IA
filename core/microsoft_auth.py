@@ -10,7 +10,7 @@ from core.paths import USER_DATA_DIR
 ENV_CLIENT_ID_KEY = "ASISTENTEIA_MS_CLIENT_ID"
 ENV_TENANT_ID_KEY = "ASISTENTEIA_MS_TENANT_ID"
 
-DEFAULT_TENANT_ID = "common"  # cuentas personales + de trabajo/escuela
+DEFAULT_TENANT_ID = "common"
 GRAPH_ME_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
 SCOPES = ["User.Read"]
 
@@ -18,7 +18,6 @@ TOKEN_CACHE_PATH = USER_DATA_DIR / "ms_token_cache.bin"
 
 
 def is_configured() -> bool:
-    """True si hay un Client ID de Microsoft Entra configurado (ver docstring del módulo)."""
     load_environment()
     return bool(os.environ.get(ENV_CLIENT_ID_KEY))
 
@@ -34,14 +33,13 @@ def _get_tenant_id() -> str:
 
 
 class MicrosoftAuthService:
-    """Login con Microsoft (device code flow) + obtención del nombre real vía Graph."""
 
     def __init__(self) -> None:
-        self._app = None  # se crea perezosamente, solo si is_configured()
+        self._app = None
         self._token_cache = None
 
     def _build_app(self):
-        import msal  # import perezoso: si no está instalado, solo falla si de verdad se usa
+        import msal
 
         if self._token_cache is None:
             self._token_cache = msal.SerializableTokenCache()
@@ -49,14 +47,10 @@ class MicrosoftAuthService:
                 try:
                     self._token_cache.deserialize(TOKEN_CACHE_PATH.read_text(encoding="utf-8"))
                 except Exception:
-                    pass  # caché corrupta o vacía: se ignora, se pedirá login de nuevo
+                    pass
 
         client_id = _get_client_id()
         authority = f"https://login.microsoftonline.com/{_get_tenant_id()}"
-        # OJO: construir PublicClientApplication ya hace una llamada de red real
-        # (descubre la configuración del tenant), no es diferido hasta el login.
-        # Sin internet (o con ese dominio bloqueado), esto lanza una excepción,
-        # por eso todo llamador de _build_app() debe envolverlo en try/except.
         return msal.PublicClientApplication(client_id, authority=authority, token_cache=self._token_cache)
 
     def _save_cache(self) -> None:
@@ -67,36 +61,20 @@ class MicrosoftAuthService:
 
     @staticmethod
     def _restrict_permissions(path: Path) -> None:
-        """
-        El archivo contiene un token de sesión real de Microsoft: se
-        restringe a que solo el usuario propietario pueda leerlo o
-        escribirlo (0600). En Windows esto no aplica (el modelo de
-        permisos es distinto y ya protege el perfil de usuario por
-        defecto), así que se hace solo en macOS/Linux.
-        """
         if sys.platform.startswith("win"):
             return
         try:
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
         except OSError:
-            pass  # sistema de archivos que no soporta esto (ej. algunos NAS): no es crítico
+            pass
 
-    # ------------------------------------------------------------------ #
-    # Login silencioso (usa la sesión guardada de una vez anterior)
-    # ------------------------------------------------------------------ #
     def try_silent_login(self) -> Optional[dict]:
-        """
-        Si ya hubo un login anterior en esta computadora, intenta renovar
-        la sesión sin pedirle nada al usuario. Retorna el resultado del
-        token (con `access_token`) o None si no hay sesión guardada o
-        ya no es válida (hace falta volver a iniciar sesión).
-        """
         if not is_configured():
             return None
 
         try:
             app = self._build_app()
-        except Exception:  # noqa: BLE001 - sin internet, dominio bloqueado, etc.
+        except Exception:
             return None
 
         accounts = app.get_accounts()
@@ -109,21 +87,9 @@ class MicrosoftAuthService:
             return result
         return None
 
-    # ------------------------------------------------------------------ #
-    # Login interactivo (código de dispositivo)
-    # ------------------------------------------------------------------ #
     def login_with_device_code(
         self, on_code_ready: Callable[[str, str], None]
     ) -> Tuple[bool, Optional[dict], str]:
-        """
-        Inicia el login. Llama a `on_code_ready(codigo, url)` apenas
-        Microsoft entrega el código de dispositivo, para que la UI lo
-        muestre; después esta llamada BLOQUEA (pensada para correr en un
-        hilo aparte) hasta que el usuario complete el login en el
-        navegador o se agote el tiempo de espera.
-
-        Retorna (éxito, resultado_del_token_o_None, mensaje).
-        """
         if not is_configured():
             return False, None, (
                 f"El login con Microsoft no está configurado todavía: falta la variable de entorno "
@@ -132,12 +98,12 @@ class MicrosoftAuthService:
 
         try:
             app = self._build_app()
-        except Exception as exc:  # noqa: BLE001 - sin internet, tenant/client id inválido, etc.
+        except Exception as exc:
             return False, None, f"No se pudo conectar con Microsoft: {exc}"
 
         try:
             flow = app.initiate_device_flow(scopes=SCOPES)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return False, None, f"No se pudo iniciar el login con Microsoft: {exc}"
 
         if "user_code" not in flow:
@@ -147,7 +113,7 @@ class MicrosoftAuthService:
 
         try:
             result = app.acquire_token_by_device_flow(flow)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return False, None, f"Error esperando el login: {exc}"
 
         self._save_cache()
@@ -158,16 +124,8 @@ class MicrosoftAuthService:
         error_description = (result or {}).get("error_description", "No se pudo completar el login.")
         return False, None, error_description
 
-    # ------------------------------------------------------------------ #
-    # Nombre real del usuario (vía Microsoft Graph)
-    # ------------------------------------------------------------------ #
     @staticmethod
     def get_display_name(token_result: dict) -> Optional[str]:
-        """
-        Llama a Microsoft Graph (`/me`) con el access token obtenido y
-        devuelve el nombre real de la persona (de pila, si está
-        disponible; si no, el nombre completo).
-        """
         access_token = token_result.get("access_token")
         if not access_token:
             return None
@@ -188,7 +146,6 @@ class MicrosoftAuthService:
         return data.get("givenName") or data.get("displayName")
 
     def logout(self) -> None:
-        """Borra la sesión guardada (la próxima vez pedirá login de nuevo)."""
         if TOKEN_CACHE_PATH.exists():
             TOKEN_CACHE_PATH.unlink()
         self._token_cache = None

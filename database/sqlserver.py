@@ -1,21 +1,3 @@
-"""
-Acceso a datos: SQL Server (motor empresarial).
-
-`connect()` intenta una conexión real:
-
-    1. Si el paquete `pyodbc` está instalado, abre una conexión real
-       (usando la cadena de conexión indicada, o construyéndola a
-       partir de servidor/base/usuario/contraseña) con un timeout
-       corto, y la cierra inmediatamente.
-    2. Si `pyodbc` no está instalado (por ejemplo, en un entorno sin
-       el driver ODBC de SQL Server), se hace una prueba de
-       conectividad de red real (socket TCP al puerto 1433 del
-       servidor) para al menos confirmar que el host es alcanzable,
-       dejando claro en el mensaje que no se validó usuario/clave.
-
-En ambos casos se retorna un mensaje de diagnóstico legible, nunca un
-simple "conectado" simulado.
-"""
 import socket
 from dataclasses import dataclass
 from typing import Tuple
@@ -26,7 +8,6 @@ CONNECTION_TIMEOUT_SECONDS = 5
 
 @dataclass
 class SQLServerCredentials:
-    """Parámetros de conexión a SQL Server."""
 
     server: str = ""
     database: str = ""
@@ -36,7 +17,6 @@ class SQLServerCredentials:
 
 
 class SQLServerDatabase:
-    """Conexión a SQL Server, con prueba de conectividad real."""
 
     def __init__(self, credentials: SQLServerCredentials | None = None) -> None:
         self._credentials = credentials or SQLServerCredentials()
@@ -50,7 +30,7 @@ class SQLServerDatabase:
             return False, "Debes indicar un servidor o una cadena de conexión"
 
         try:
-            import pyodbc  # type: ignore
+            import pyodbc
         except ImportError:
             return self._fallback_socket_check(creds)
 
@@ -60,25 +40,19 @@ class SQLServerDatabase:
             connection.close()
             self._connected = True
             return True, "Conectado correctamente"
-        except pyodbc.Error as exc:  # type: ignore[attr-defined]
+        except pyodbc.Error as exc:
             self._connected = False
             return False, self._describe_pyodbc_error(exc)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._connected = False
             return False, str(exc)[:160]
 
     def _fallback_socket_check(self, creds: SQLServerCredentials) -> Tuple[bool, str]:
-        """
-        Sin pyodbc (o sin el driver ODBC instalado en el sistema) no se
-        puede abrir una sesión SQL real. Como alternativa honesta, se
-        valida que el host/puerto sean alcanzables por red.
-        """
         host = creds.server.strip()
         if not host:
             self._connected = False
             return False, "pyodbc no está instalado y no hay servidor para probar la red"
 
-        # Permite server:puerto explícito; si no, usa el puerto por defecto.
         if ":" in host:
             hostname, port_str = host.split(":", 1)
             try:

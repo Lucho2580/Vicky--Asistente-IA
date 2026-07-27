@@ -1,12 +1,3 @@
-"""
-Logging simple de la aplicación.
-
-Guarda un archivo de log diario en la carpeta de logs del usuario
-(ver core/paths.py). Pensado inicialmente para el sistema de
-actualizaciones ("si falla internet, no mostrar errores molestos:
-registrar en logs"), pero cualquier otro módulo puede usarlo con
-`get_logger()`.
-"""
 import logging
 from logging.handlers import TimedRotatingFileHandler
 

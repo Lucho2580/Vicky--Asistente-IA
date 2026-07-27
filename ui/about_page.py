@@ -1,8 +1,3 @@
-"""
-Página "Acerca de": versión, build, fecha de compilación, última
-actualización, sesión actual y ubicación de los datos. Se muestra
-dentro del panel principal, no en una ventana aparte.
-"""
 import customtkinter as ctk
 
 from config.app_config import AppConfig
@@ -13,7 +8,6 @@ from ui.settings_window import Card
 
 
 class AboutPage(ctk.CTkScrollableFrame):
-    """Información de versión, sesión actual y ubicación de los datos."""
 
     def __init__(self, master, display_name: str | None = None, on_check_updates_now=None, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
@@ -45,7 +39,6 @@ class AboutPage(ctk.CTkScrollableFrame):
         )
         version_label.pack()
 
-        # --- Tarjeta de versión (version/build/fecha de compilación/última actualización) ---
         version_card = Card(self, "Versión")
         version_card.pack(fill="x", padx=24, pady=12)
         self._add_row(version_card, "Versión", APP_VERSION)
@@ -112,13 +105,6 @@ class AboutPage(ctk.CTkScrollableFrame):
             self._on_check_updates_now()
 
     def _show_release_notes(self) -> None:
-        """
-        Notas de la versión actual. Las notas de una versión NUEVA
-        disponible se muestran automáticamente en el diálogo de
-        actualización (ver ui/update_dialog.py); acá solo se informa
-        la versión instalada, porque todavía no hay un historial de
-        versiones pasadas guardado.
-        """
         self._release_notes_label.configure(
             text=(
                 f"Estás usando la versión {APP_VERSION} (build {APP_BUILD}). "

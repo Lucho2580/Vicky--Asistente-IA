@@ -1,20 +1,3 @@
-"""
-Diálogo de actualización disponible.
-
-A diferencia del resto de la app (que navega por páginas dentro del
-mismo panel), esto SÍ es una ventana propia (`CTkToplevel`): es una
-notificación puntual y descartable, no una sección de navegación
-permanente, así que tiene sentido que aparezca como un diálogo aparte
-— igual que en VS Code, Discord o Notion.
-
-Diseño: franja superior gris oscura con el logo real (mismo lenguaje
-visual que la pantalla de login), y debajo la comparación de versión
-instalada -> nueva versión con una flecha, en vez de una tabla plana.
-
-No mezcla lógica de actualización: solo llama a `UpdateManager` (que
-ya vive en services/) y muestra su progreso; toda la lógica de
-verificación/descarga/instalación real vive ahí, no acá.
-"""
 import customtkinter as ctk
 from PIL import Image
 
@@ -39,11 +22,6 @@ def _format_size(num_bytes: int) -> str:
 
 
 class UpdateDialog(ctk.CTkToplevel):
-    """
-    Ventana de "Nueva versión disponible", que se transforma en una
-    vista de progreso de descarga cuando el usuario presiona
-    "Actualizar ahora".
-    """
 
     def __init__(
         self,
@@ -68,7 +46,6 @@ class UpdateDialog(ctk.CTkToplevel):
         self._on_ready_to_install = on_ready_to_install
         self._cancel_requested = False
 
-        # --- Franja superior fija (no cambia entre la vista de info y la de progreso) ---
         header = ctk.CTkFrame(self, fg_color=theme.SIDEBAR_BG, corner_radius=0, height=52)
         header.pack(fill="x")
         header.pack_propagate(False)
@@ -81,7 +58,7 @@ class UpdateDialog(ctk.CTkToplevel):
             logo_label = ctk.CTkLabel(header_content, image=logo_image, text="")
             logo_label.pack(side="left", padx=(0, 8))
         except Exception:
-            pass  # si el logo no está disponible, se sigue sin él
+            pass
 
         ctk.CTkLabel(
             header_content,
@@ -97,11 +74,8 @@ class UpdateDialog(ctk.CTkToplevel):
 
         self.transient(master)
         self.after(10, self.lift)
-        self.grab_set()  # modal: no se puede seguir usando la app de fondo mientras decide
+        self.grab_set()
 
-    # ------------------------------------------------------------------ #
-    # Vista 1: información de la nueva versión
-    # ------------------------------------------------------------------ #
     def _clear_container(self) -> None:
         for widget in self._container.winfo_children():
             widget.destroy()
@@ -109,14 +83,6 @@ class UpdateDialog(ctk.CTkToplevel):
     def _build_info_view(self) -> None:
         self._clear_container()
 
-        # IMPORTANTE: los botones se empacan PRIMERO, con side="bottom",
-        # para que Tkinter les reserve su espacio natural (siempre
-        # visibles, nunca cortados) antes de repartir lo que sobra entre
-        # el resto del contenido. Antes se empacaban al final: si había
-        # muchas notas de versión o el aviso de "obligatoria" ocupaba
-        # varias líneas, el contenido de arriba se comía el espacio de
-        # los botones y quedaban recortados en la parte inferior de la
-        # ventana.
         button_row = ctk.CTkFrame(self._container, fg_color="transparent")
         button_row.pack(side="bottom", fill="x", pady=(12, 0))
 
@@ -144,7 +110,6 @@ class UpdateDialog(ctk.CTkToplevel):
         )
         update_button.pack(side="left", fill="x", expand=True)
 
-        # --- Comparación de versión instalada -> nueva, con flecha ---
         compare_row = ctk.CTkFrame(self._container, fg_color="transparent")
         compare_row.pack(pady=(4, 2))
 
@@ -230,9 +195,6 @@ class UpdateDialog(ctk.CTkToplevel):
         if self._on_remind_later:
             self._on_remind_later()
 
-    # ------------------------------------------------------------------ #
-    # Vista 2: progreso de descarga
-    # ------------------------------------------------------------------ #
     def _start_download(self) -> None:
         self._cancel_requested = False
         self._build_progress_view()
@@ -288,7 +250,6 @@ class UpdateDialog(ctk.CTkToplevel):
         self._cancel_button.pack(fill="x")
 
     def _handle_progress(self, downloaded: int, total: int, speed: float, percent: float) -> None:
-        # Se llama desde el hilo de descarga: hay que pasar al hilo principal.
         self.after(0, lambda: self._update_progress_ui(downloaded, total, speed, percent))
 
     def _update_progress_ui(self, downloaded: int, total: int, speed: float, percent: float) -> None:
@@ -298,7 +259,7 @@ class UpdateDialog(ctk.CTkToplevel):
             self._percent_label.configure(text=f"{percent:.0f}%  ·  {size_text}")
             self._speed_label.configure(text=_format_speed(speed))
         except Exception:
-            pass  # la ventana ya se pudo haber cerrado (ej. tras cancelar)
+            pass
 
     def _handle_cancel(self) -> None:
         self._cancel_requested = True
@@ -314,7 +275,6 @@ class UpdateDialog(ctk.CTkToplevel):
                 self._on_ready_to_install(path)
             return
 
-        # Error o cancelación: mostrar el motivo y ofrecer reintentar o volver.
         try:
             self._status_label.configure(text=f"⚠️ {error}")
             self._cancel_button.configure(state="normal", text="Volver", command=self._build_info_view)

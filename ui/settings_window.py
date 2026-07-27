@@ -13,7 +13,6 @@ from ui import theme
 
 
 class Card(ctk.CTkFrame):
-    """Tarjeta reutilizable con título, descripción y contenido propio."""
 
     def __init__(self, master, title: str, description: str = "", **kwargs):
         super().__init__(
@@ -45,7 +44,6 @@ class Card(ctk.CTkFrame):
             desc_label.pack(anchor="w", padx=20, pady=(0, 10))
 
     def add_field(self, label_text: str, widget_cls, **widget_kwargs):
-        """Agrega una fila de campo (etiqueta + widget) al cuerpo de la tarjeta."""
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=20, pady=4)
 
@@ -60,9 +58,6 @@ class Card(ctk.CTkFrame):
         label.pack(side="left")
 
         if widget_cls is ctk.CTkOptionMenu:
-            # customtkinter usa su tema azul por defecto para estos
-            # colores si no se especifican — se fuerza el rojo
-            # corporativo para que no quede un desplegable azul suelto.
             widget_kwargs.setdefault("fg_color", theme.PRIMARY_RED)
             widget_kwargs.setdefault("button_color", theme.PRIMARY_RED_HOVER)
             widget_kwargs.setdefault("button_hover_color", theme.PRIMARY_RED)
@@ -79,7 +74,6 @@ class Card(ctk.CTkFrame):
 
 
 class SettingsPage(ctk.CTkScrollableFrame):
-    """Página completa de configuración, dividida en tarjetas."""
 
     def __init__(
         self,
@@ -99,9 +93,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self._build_database_card()
         self._build_knowledge_base_card()
 
-    # ------------------------------------------------------------------ #
-    # Tarjeta: BASE DE DATOS
-    # ------------------------------------------------------------------ #
     def _build_database_card(self) -> None:
         settings = self._config.settings
         description = "Datos de conexión al servidor SQL Server corporativo de La Vianda."
@@ -182,9 +173,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
         if self._on_db_connection_change:
             self._on_db_connection_change(connected, message)
 
-    # ------------------------------------------------------------------ #
-    # Tarjeta: BASE DE CONOCIMIENTO (archivos de entrenamiento + historiales)
-    # ------------------------------------------------------------------ #
     def _build_knowledge_base_card(self) -> None:
         card = Card(
             self,
@@ -194,8 +182,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
         )
         card.pack(fill="x", padx=24, pady=(12, 24))
 
-        # --- Carpeta "Training": el usuario coloca archivos ahí directamente,
-        # sin tener que subirlos uno por uno desde la app ---
         training_folder_row = ctk.CTkFrame(card, fg_color="transparent")
         training_folder_row.pack(fill="x", padx=20, pady=(0, 8))
 
@@ -245,7 +231,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
         )
         self.training_sync_status_label.pack(anchor="w", padx=20, pady=(0, 8))
 
-        # --- Archivos de entrenamiento ---
         files_header = ctk.CTkFrame(card, fg_color="transparent")
         files_header.pack(fill="x", padx=20, pady=(0, 4))
 
@@ -272,7 +257,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self.files_list_frame.pack(fill="x", padx=20, pady=(4, 8))
         self._refresh_files_list()
 
-        # --- Historial de conexiones ---
         connections_title = ctk.CTkLabel(
             card,
             text="Historial de conexiones (IA y Base de Datos)",
@@ -292,7 +276,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self.connections_log_box.configure(state="disabled")
         self._refresh_connections_log()
 
-        # --- Preguntas y respuestas centralizadas ---
         qa_title = ctk.CTkLabel(
             card,
             text="Preguntas y respuestas recientes",
@@ -318,14 +301,12 @@ class SettingsPage(ctk.CTkScrollableFrame):
         TRAINING_DIR.mkdir(parents=True, exist_ok=True)
         try:
             if sys.platform.startswith("win"):
-                os.startfile(TRAINING_DIR)  # type: ignore[attr-defined]
+                os.startfile(TRAINING_DIR)
             elif sys.platform == "darwin":
                 subprocess.run(["open", str(TRAINING_DIR)], check=False)
             else:
                 subprocess.run(["xdg-open", str(TRAINING_DIR)], check=False)
         except Exception:
-            # Sin gestor de archivos disponible (ej. entorno de pruebas sin
-            # escritorio): se ignora, no es un error crítico.
             pass
 
     def _reload_training_folder(self) -> None:
@@ -363,7 +344,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
             self._knowledge_base.add_document(file_path)
         except UnsupportedFileTypeError:
             pass
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         self._refresh_files_list()
 
@@ -405,10 +386,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
             file_label.pack(side="left", fill="x", expand=True)
 
             if doc.is_from_training_folder:
-                # Gestionado automáticamente por la carpeta: para quitarlo
-                # hay que borrar el archivo de la carpeta Training y
-                # recargar (si no, la próxima sincronización lo vuelve a
-                # traer, ya que el archivo real sigue estando en disco).
                 managed_label = ctk.CTkLabel(
                     row,
                     text="Gestionado por Training",
@@ -482,9 +459,6 @@ class SettingsPage(ctk.CTkScrollableFrame):
 
         self.qa_log_box.configure(state="disabled")
 
-    # ------------------------------------------------------------------ #
-    # Guardado (se llama al salir de la página, ver MainWindow)
-    # ------------------------------------------------------------------ #
     def save(self) -> None:
         self._config.update(
             db_server=self.db_server_entry.get(),

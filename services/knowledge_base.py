@@ -1,13 +1,3 @@
-"""
-Servicio de Base de Conocimiento.
-
-Gestiona los archivos de "entrenamiento" (documentos que sirven de
-contexto para las respuestas de la IA): subirlos, listarlos, buscarlos
-y eliminarlos. Toda la persistencia real vive en `KnowledgeStore`
-(SQLite); este servicio agrega la lógica de negocio (extracción de
-texto, validación de tipos de archivo, extracción de palabras clave,
-armado de contexto para el prompt).
-"""
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -16,16 +6,11 @@ from core.paths import TRAINING_DIR
 from database.knowledge_store import KnowledgeStore
 from models.training_file import TrainingFile
 
-# Tipos de archivo de los que se puede extraer texto de forma directa.
-# (PDF/DOCX quedan para una futura iteración: requieren librerías de
-# parseo adicionales que no están en el alcance actual.)
 SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log"}
 
-MAX_CONTENT_LENGTH = 200_000  # ~200 KB de texto por archivo, para no inflar la BD
+MAX_CONTENT_LENGTH = 200_000
 MIN_KEYWORD_LENGTH = 3
 
-# Palabras muy comunes que no aportan a la búsqueda (se ignoran al
-# extraer palabras clave de la pregunta del usuario).
 _STOPWORDS = {
     "que", "cual", "cuales", "cuál", "cuáles", "es", "la", "el", "los", "las",
     "de", "del", "en", "y", "o", "un", "una", "unos", "unas", "para", "por",
@@ -36,39 +21,26 @@ _STOPWORDS = {
 
 
 class UnsupportedFileTypeError(Exception):
-    """Se lanza cuando el archivo no es un tipo de texto soportado todavía."""
+    pass
 
 
 def extract_keywords(text: str) -> List[str]:
-    """Extrae palabras clave relevantes de una pregunta (sin stopwords ni signos)."""
     words = re.findall(r"[\wáéíóúñü]+", text.lower(), flags=re.UNICODE)
     return [w for w in words if len(w) >= MIN_KEYWORD_LENGTH and w not in _STOPWORDS]
 
 
 def friendly_name(filename: str) -> str:
-    """Convierte 'cambiar_contrasena_zeus.md' en 'Cambiar contrasena zeus', para mostrar en la UI."""
     stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     words = stem.replace("_", " ").replace("-", " ").split()
     return " ".join(w.capitalize() for w in words) if words else stem
 
 
 class KnowledgeBase:
-    """Punto único de acceso a la Base de Conocimiento (documentos de entrenamiento)."""
 
     def __init__(self, store: Optional[KnowledgeStore] = None) -> None:
         self._store = store or KnowledgeStore()
 
     def add_document(self, file_path: str) -> TrainingFile:
-        """
-        Sube un archivo real de disco a la Base de Conocimiento: lee su
-        contenido de texto y lo persiste en knowledge.db.
-
-        Esto es para documentos de referencia PERMANENTES (ej. un
-        procedimiento que se va a consultar en preguntas futuras). Si
-        el usuario está adjuntando un archivo puntual a una pregunta
-        del chat (ej. "resumime esto"), usar `read_ephemeral_attachment`
-        en su lugar — ver ahí el porqué de la distinción.
-        """
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"No se encontró el archivo: {file_path}")
@@ -92,27 +64,6 @@ class KnowledgeBase:
         )
 
     def read_ephemeral_attachment(self, file_path: str) -> "tuple[str, str]":
-        """
-        Lee el contenido de un archivo adjuntado a UNA pregunta puntual
-        del chat (ej. "resumime este documento"), sin persistirlo en la
-        Base de Conocimiento.
-
-        Antes, adjuntar cualquier archivo desde el chat lo agregaba de
-        inmediato a `training_files` (permanente, buscable en
-        preguntas futuras) — mezclaba dos cosas distintas: "acá tenés
-        un documento para responder ESTA pregunta" y "este es un
-        procedimiento de referencia que quiero que quede guardado para
-        siempre". Esta función es para lo primero: el contenido se lee
-        y se devuelve para usarlo como contexto de UNA respuesta, y no
-        queda guardado en ningún lado después de eso. Para lo segundo
-        (documentos de referencia permanentes) seguís teniendo
-        `add_document` y la carpeta "Training".
-
-        Retorna (nombre_de_archivo, contenido_de_texto). Lanza las
-        mismas excepciones que `add_document` (`FileNotFoundError`,
-        `UnsupportedFileTypeError`) para que el llamador las maneje
-        igual.
-        """
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"No se encontró el archivo: {file_path}")
@@ -131,28 +82,7 @@ class KnowledgeBase:
     def list_documents(self) -> List[TrainingFile]:
         return self._store.list_training_files()
 
-    # ------------------------------------------------------------------ #
-    # Sincronización con la carpeta "Training" (sin subida manual)
-    # ------------------------------------------------------------------ #
     def sync_training_folder(self, folder_path: Optional[Path] = None) -> Dict[str, object]:
-        """
-        Sincroniza los archivos de la carpeta "Training" con la Base de
-        Conocimiento: el usuario solo tiene que colocar sus archivos ahí
-        (por ejemplo, arrastrándolos desde el Explorador de Windows), sin
-        tener que subirlos uno por uno desde la app.
-
-        - Archivo nuevo en la carpeta -> se agrega.
-        - Archivo ya indexado pero modificado (fecha de modificación más
-          reciente que la registrada) -> se re-indexa con el contenido
-          actualizado.
-        - Archivo que ya no está en la carpeta -> se elimina de la Base
-          de Conocimiento.
-        - Los archivos subidos manualmente (chat o botón "Subir archivo")
-          NO se tocan: solo se gestionan los que tienen un `source_path`
-          registrado (es decir, los que vinieron de esta carpeta).
-
-        Retorna un resumen: {"added": n, "updated": n, "removed": n, "errors": [...]}
-        """
         folder = Path(folder_path) if folder_path else TRAINING_DIR
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -177,7 +107,7 @@ class KnowledgeBase:
                     self._store.remove_training_file(existing.id)
                     self._add_from_training_folder(path_obj, mtime)
                     summary["updated"] += 1
-            except Exception as exc:  # noqa: BLE001 - un archivo problemático no debe frenar el resto
+            except Exception as exc:
                 summary["errors"].append(f"{path_obj.name}: {exc}")
 
         for path_str, existing in tracked_by_path.items():
@@ -200,41 +130,15 @@ class KnowledgeBase:
         )
 
     def search(self, query: str, top_k: int = 5) -> List[TrainingFile]:
-        """
-        Busca documentos relevantes para `query` (una pregunta completa
-        del usuario). Extrae las palabras clave de la pregunta y busca
-        coincidencias reales de esas palabras en los documentos —
-        comparar la pregunta completa como una sola cadena nunca
-        encontraría nada, porque los documentos no contienen la
-        pregunta textual.
-        """
         return [doc for _score, doc in self.search_with_scores(query, top_k=top_k)]
 
     def search_with_scores(self, query: str, top_k: int = 5) -> List[tuple]:
-        """Igual que `search`, pero devuelve tuplas (puntaje, TrainingFile)."""
         keywords = extract_keywords(query)
         if not keywords:
             return []
         return self._store.search_training_files_scored(keywords, top_k=top_k)
 
     def detect_ambiguous_matches(self, query: str, top_k: int = 5) -> List[TrainingFile]:
-        """
-        Si dos o más documentos empatan (o casi empatan) en el primer
-        lugar de relevancia, la pregunta es ambigua: no hay un
-        procedimiento claramente más aplicable que otro (ej. "cambiar
-        la contraseña" podría ser la del correo o la de Zeus). En ese
-        caso, en vez de mezclar el contexto de ambos o elegir uno al
-        azar, conviene preguntarle al usuario a cuál se refiere.
-
-        Como el puntaje es un valor ponderado (no un conteo entero), se
-        considera "empate" cuando el segundo lugar queda dentro de un
-        15% del puntaje del primero, en vez de exigir una igualdad
-        exacta (que casi nunca ocurriría con valores decimales).
-
-        Retorna la lista de documentos empatados en el primer lugar
-        (2 o más) si la pregunta es ambigua, o una lista vacía si hay
-        un único ganador claro (o ninguna coincidencia).
-        """
         scored = self.search_with_scores(query, top_k=top_k)
         if len(scored) < 2:
             return []
@@ -252,11 +156,6 @@ class KnowledgeBase:
         self._store.update_training_file(document_id, filename=filename)
 
     def build_context_snippet(self, matches: List[TrainingFile], max_chars_per_doc: int = 800) -> str:
-        """
-        Arma un bloque de texto con el contenido de los documentos
-        encontrados, listo para inyectarse como contexto en el prompt
-        que se envía al modelo de IA (patrón RAG simple).
-        """
         if not matches:
             return ""
 

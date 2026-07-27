@@ -1,36 +1,3 @@
-"""
-Pantalla de login, mostrada como un OVERLAY dentro de la misma ventana
-raíz de la aplicación — no como una segunda ventana/raíz de Tkinter
-separada.
-
-Esto es importante y corrige un bug real: customtkinter mantiene un
-rastreador interno de escala de pantalla (DPI) por cada raíz `ctk.CTk()`
-que se crea. Si se crea una raíz para el login y, al terminar, se la
-destruye para crear una raíz DISTINTA para la ventana principal, ese
-rastreador deja llamadas `after()` programadas contra un intérprete
-Tcl que ya no existe — y aparecen errores como:
-
-    invalid command name "...update"
-    invalid command name "..._set_scaled_min_max"
-    invalid command name "...check_dpi_scaling"
-
-La solución es tener una única raíz `ctk.CTk()` para toda la vida de
-la aplicación (ver ui/main_window.py): el login es solo un `CTkFrame`
-que se muestra primero y se destruye a sí mismo al terminar, dejando
-lugar al resto de la interfaz en la MISMA ventana.
-
-Diseño: tarjeta centrada de panel dividido — el panel izquierdo (gris
-oscuro, con el logo real de La Vianda) queda fijo durante todo el
-proceso; el panel derecho cambia de contenido según el paso (botón de
-login -> código de dispositivo), sin que la tarjeta cambie de tamaño
-ni de posición entre un paso y el otro.
-
-Intenta primero un login silencioso (si ya se inició sesión antes en
-esta computadora, no vuelve a pedir nada). Si no hay sesión guardada,
-exige "Iniciar sesión con Microsoft" (código de dispositivo) — el
-acceso está centralizado en la cuenta de correo de Microsoft, no
-existe una vía para entrar sin loguearse.
-"""
 import threading
 import webbrowser
 
@@ -47,7 +14,6 @@ LEFT_PANEL_WIDTH = 320
 
 
 class LoginOverlay(ctk.CTkFrame):
-    """Overlay de login, mostrado dentro de la ventana principal antes que el resto de la UI."""
 
     def __init__(self, master, on_complete, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
@@ -57,19 +23,12 @@ class LoginOverlay(ctk.CTkFrame):
         self._completed = False
 
         self._build_ui()
-        # Intenta continuar la sesión anterior sin pedirle nada al usuario.
         self.after(200, self._try_silent_login)
 
     def _build_ui(self) -> None:
-        # Panel dividido a pantalla completa (ocupa toda la ventana, sin
-        # tarjeta flotante ni espacio vacío alrededor).
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ------------------------------------------------------------ #
-        # Panel izquierdo: fijo, gris oscuro corporativo, logo real.
-        # No cambia entre el paso del botón y el paso del código.
-        # ------------------------------------------------------------ #
         left_panel = ctk.CTkFrame(
             self, width=LEFT_PANEL_WIDTH, fg_color=theme.SIDEBAR_BG, corner_radius=0
         )
@@ -84,7 +43,7 @@ class LoginOverlay(ctk.CTkFrame):
             logo_label = ctk.CTkLabel(logo_container, image=logo_image, text="")
             logo_label.pack(pady=(0, 18))
         except Exception:
-            pass  # si el archivo del logo no está disponible, se sigue sin él
+            pass
 
         brand_label = ctk.CTkLabel(
             logo_container,
@@ -95,9 +54,6 @@ class LoginOverlay(ctk.CTkFrame):
         )
         brand_label.pack()
 
-        # ------------------------------------------------------------ #
-        # Panel derecho: cambia de contenido según el paso (botón <-> código).
-        # ------------------------------------------------------------ #
         self._right_panel = ctk.CTkFrame(self, fg_color=theme.SURFACE_WHITE, corner_radius=0)
         self._right_panel.grid(row=0, column=1, sticky="nsew")
 
@@ -137,7 +93,6 @@ class LoginOverlay(ctk.CTkFrame):
         if not is_configured():
             self._login_button.configure(state="disabled")
 
-        # --- Área del código de dispositivo (oculta hasta que haga falta) ---
         self._code_frame = ctk.CTkFrame(right_content, fg_color="transparent")
 
         code_instructions = ctk.CTkLabel(
@@ -207,9 +162,6 @@ class LoginOverlay(ctk.CTkFrame):
         )
         self._status_label.pack(pady=(12, 0))
 
-    # ------------------------------------------------------------------ #
-    # Login silencioso (sesión de una vez anterior, si existe)
-    # ------------------------------------------------------------------ #
     def _try_silent_login(self) -> None:
         if not is_configured():
             return
@@ -228,11 +180,8 @@ class LoginOverlay(ctk.CTkFrame):
         try:
             self._status_label.configure(text="Inicia sesión con tu cuenta de Microsoft para continuar.")
         except Exception:
-            pass  # el overlay ya se pudo haber destruido (login completado por otra vía)
+            pass
 
-    # ------------------------------------------------------------------ #
-    # Login interactivo (código de dispositivo)
-    # ------------------------------------------------------------------ #
     def _handle_login_click(self) -> None:
         self._login_button.configure(state="disabled", text="Conectando...")
         self._status_label.configure(text="Conectando con Microsoft...")
@@ -258,13 +207,13 @@ class LoginOverlay(ctk.CTkFrame):
         try:
             webbrowser.open(url)
         except Exception:
-            pass  # sin navegador disponible (ej. entorno headless): el usuario lo abre a mano
+            pass
 
     def _handle_login_result(self, success: bool, display_name: str | None, message: str) -> None:
         try:
             self._login_button.configure(state="normal", text="🔑 Iniciar sesión con Microsoft")
         except Exception:
-            return  # el overlay ya se pudo haber destruido (login exitoso concurrente)
+            return
         if success:
             self._complete(display_name or "Usuario")
         else:
@@ -279,13 +228,12 @@ class LoginOverlay(ctk.CTkFrame):
         except Exception:
             pass
 
-    # ------------------------------------------------------------------ #
     def _complete(self, display_name: str | None) -> None:
         if self._completed:
             return
         self._completed = True
         try:
-            self.destroy()  # destruye este FRAME, nunca la ventana raíz
+            self.destroy()
         except Exception:
             pass
         self._on_complete(display_name)

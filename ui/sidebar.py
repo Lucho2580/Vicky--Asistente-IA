@@ -1,17 +1,3 @@
-"""
-Menú lateral de navegación.
-
-Botones habilitados (con acción real de navegación), agrupados en dos
-secciones:
-    PRINCIPAL: Inicio, Nuevo Chat, Historial
-    SISTEMA:   Tickets (deshabilitado), Configuración, Ayuda, Acerca de
-
-El botón correspondiente a la vista actualmente seleccionada se
-resalta con el color de acento rojo (corporativo de La Vianda). Al
-pie, separado por una línea, se muestra el usuario logueado (avatar
-con iniciales + nombre) — si inició sesión con Microsoft, es su
-nombre real.
-"""
 import customtkinter as ctk
 from PIL import Image
 
@@ -22,7 +8,6 @@ _LOGO_PATH = get_asset_path("logo.png")
 
 
 def _initials_from_name(name: str) -> str:
-    """'Luis Enrique' -> 'LE'. Un solo nombre -> su primera letra."""
     parts = [p for p in name.strip().split() if p]
     if not parts:
         return "?"
@@ -32,7 +17,6 @@ def _initials_from_name(name: str) -> str:
 
 
 class SidebarButton(ctk.CTkButton):
-    """Botón de navegación individual con estado seleccionable."""
 
     def __init__(self, master, text: str, command=None, enabled: bool = True, **kwargs):
         self._enabled = enabled
@@ -54,7 +38,6 @@ class SidebarButton(ctk.CTkButton):
         )
 
     def set_selected(self, selected: bool) -> None:
-        """Resalta (o quita el resalte) este botón como opción activa."""
         if not self._enabled:
             return
         if selected:
@@ -64,7 +47,6 @@ class SidebarButton(ctk.CTkButton):
 
 
 class Sidebar(ctk.CTkFrame):
-    """Panel lateral con las secciones de navegación de la aplicación."""
 
     def __init__(self, master, on_navigate=None, display_name: str | None = None, **kwargs):
         super().__init__(master, fg_color=theme.SIDEBAR_BG, corner_radius=0, **kwargs)
@@ -76,7 +58,6 @@ class Sidebar(ctk.CTkFrame):
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
 
-        # --- Encabezado: logo + nombre de la app ---
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.grid(row=0, column=0, padx=16, pady=(20, 18), sticky="w")
 
@@ -84,7 +65,7 @@ class Sidebar(ctk.CTkFrame):
             logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(24, 24))
             ctk.CTkLabel(header, image=logo_image, text="").pack(side="left", padx=(0, 8))
         except Exception:
-            pass  # si el logo no está disponible, se sigue sin él
+            pass
 
         ctk.CTkLabel(
             header,
@@ -105,8 +86,6 @@ class Sidebar(ctk.CTkFrame):
             ("about", "ℹ  Acerca de", True),
         ])
 
-        # Empuja el pie de usuario hacia abajo, dejando el espacio
-        # sobrante en el medio (no al fondo, como quedaba antes).
         self.grid_rowconfigure(row, weight=1)
         row += 1
 
@@ -168,6 +147,5 @@ class Sidebar(ctk.CTkFrame):
             self._on_navigate(key)
 
     def select(self, key: str) -> None:
-        """Marca visualmente `key` como la sección activa."""
         for name, button in self._buttons.items():
             button.set_selected(name == key)

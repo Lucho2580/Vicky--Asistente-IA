@@ -1,12 +1,3 @@
-"""
-Servicio de historial de conexiones (IA y Base de Datos).
-
-Cada vez que se prueba una conexión desde Configuración (o al cambiar
-de motor de IA desde el encabezado), queda un registro persistente:
-categoría, nombre del motor/servidor, éxito o fracaso, y el mensaje de
-diagnóstico real. Así se puede consultar con el tiempo qué conexiones
-se intentaron y cuándo, no solo el estado actual.
-"""
 from typing import List, Optional
 
 from database.knowledge_store import KnowledgeStore
@@ -17,7 +8,6 @@ CATEGORY_DATABASE = "base_de_datos"
 
 
 class ConnectionLogService:
-    """Punto único de acceso al historial de intentos de conexión."""
 
     def __init__(self, store: KnowledgeStore | None = None) -> None:
         self._store = store or KnowledgeStore()

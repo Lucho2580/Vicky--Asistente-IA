@@ -1,17 +1,3 @@
-"""
-Proveedor de IA: Google Gemini.
-
-`connect()` valida la API Key contra el listado de modelos.
-`send_message()` usa el endpoint `generateContent` del modelo
-`gemini-1.5-flash` para obtener una respuesta real. Ambas son
-peticiones HTTP reales, sin simulaciones.
-
-SEGURIDAD: la API Key se envía en el header `x-goog-api-key` (soportado
-oficialmente por la API de Gemini), NUNCA en el query string de la URL.
-Una key en la URL queda expuesta en logs de proxies, balanceadores,
-CDNs y servidores intermedios por los que pasa la petición; un header
-no se registra por defecto en ese tipo de logs.
-"""
 import json
 from typing import Callable, Optional, Tuple
 
@@ -22,7 +8,6 @@ DEFAULT_MODEL = "gemini-1.5-flash"
 
 
 class GeminiProvider(AIProvider):
-    """Integración con Google Gemini (conexión y chat reales)."""
 
     name = "Gemini"
 
@@ -79,10 +64,6 @@ class GeminiProvider(AIProvider):
         self._enforce_rate_limit()
 
         base_url = self._endpoint or MODELS_ENDPOINT
-        # alt=sse hace que Gemini transmita la respuesta como Server-Sent
-        # Events (igual formato de líneas "data: {...}" que OpenAI), en
-        # vez de devolver todo junto al final. La key ya no va acá: ver
-        # _auth_headers().
         url = f"{base_url}/{DEFAULT_MODEL}:streamGenerateContent?alt=sse"
         payload = self._build_payload(message, system_prompt)
 
@@ -119,16 +100,12 @@ class GeminiProvider(AIProvider):
         return "".join(collected)
 
     def _auth_headers(self) -> dict:
-        """API Key vía header (recomendado por Google), nunca en la URL."""
         return {"x-goog-api-key": self._api_key}
 
     @staticmethod
     def _build_payload(message: str, system_prompt: Optional[str]) -> dict:
         payload = {"contents": [{"parts": [{"text": message}]}]}
         if system_prompt:
-            # Gemini usa un campo separado "system_instruction", no un
-            # mensaje más dentro de "contents" (formato propio, distinto
-            # al de OpenAI/GitHub Models).
             payload["system_instruction"] = {"parts": [{"text": system_prompt}]}
         return payload
 

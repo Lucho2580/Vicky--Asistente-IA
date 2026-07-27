@@ -39,8 +39,6 @@ CONNECTION_STATES = {
     "connected": "🟢 IA conectada",
 }
 
-# Único motor de IA soportado por ahora: GitHub Copilot. Se conecta solo
-# (ver MainWindow._start_auto_connect_with_retry), sin selector manual.
 AI_ENGINE_NAME = "GitHub Copilot"
 AI_PROVIDERS = {
     AI_ENGINE_NAME: GitHubCopilotProvider,
@@ -48,11 +46,6 @@ AI_PROVIDERS = {
 
 
 class ContentHeader(ctk.CTkFrame):
-    """
-    Encabezado delgado, propio de la columna de contenido (no de toda
-    la ventana). Usa el mismo color de fondo que la página para que no
-    se perciba como un banner separado.
-    """
 
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, height=44, **kwargs)
@@ -90,18 +83,13 @@ class ContentHeader(ctk.CTkFrame):
         self.status_label.grid(row=0, column=4, padx=(0, 20), pady=8)
 
     def set_connection_state(self, state: str) -> None:
-        """state: 'disconnected' | 'connecting' | 'connected'"""
         self.status_label.configure(text=CONNECTION_STATES.get(state, CONNECTION_STATES["disconnected"]))
 
 
 class MainWindow(ctk.CTk):
-    """Ventana principal de Vicky Consulting."""
 
     def __init__(self, display_name: str | None = None) -> None:
         super().__init__()
-        # Si viene de un login real (Microsoft), se usa ese nombre; si no,
-        # build_greeting() cae solo al usuario del sistema operativo (getpass),
-        # igual que antes de que existiera el login.
         self._display_name = display_name
         self.title("Vicky Consulting")
         self.geometry("1100x720")
@@ -112,18 +100,11 @@ class MainWindow(ctk.CTk):
 
         self._conversation_service = ConversationService()
 
-        # Base de Conocimiento (archivos de entrenamiento), historial de
-        # conexiones y registro centralizado de preguntas/respuestas.
-        # Comparten un mismo archivo knowledge.db (una conexión sqlite por
-        # servicio; sqlite soporta múltiples conexiones al mismo archivo).
         knowledge_store = KnowledgeStore()
         self._knowledge_base = KnowledgeBase(knowledge_store)
         self._qa_log_service = QALogService(knowledge_store)
         self._connection_log_service = ConnectionLogService(knowledge_store)
 
-        # Sincroniza la carpeta "Training": cualquier archivo que el
-        # usuario ya haya colocado ahí (sin subirlo manualmente desde la
-        # app) queda indexado desde el primer momento.
         self._knowledge_base.sync_training_folder()
 
         settings = self._config.settings
@@ -143,14 +124,8 @@ class MainWindow(ctk.CTk):
         self._current_stream_state: dict | None = None
 
         if self._display_name is None:
-            # Sin nombre todavía: mostrar el login como un overlay DENTRO
-            # de esta misma ventana (nunca una segunda raíz de Tkinter —
-            # ver ui/login_window.py para el motivo exacto). El resto de
-            # la interfaz recién se construye cuando el login termina.
             self._show_login_overlay()
         else:
-            # Ya se pasó un nombre (ej. pruebas, o si en el futuro se
-            # reutiliza la ventana tras un logout): se salta el login.
             self._build_layout()
             self._apply_initial_state()
             self._maybe_check_for_updates_on_startup()
@@ -167,10 +142,6 @@ class MainWindow(ctk.CTk):
         self._apply_initial_state()
         self._maybe_check_for_updates_on_startup()
 
-    # ------------------------------------------------------------------ #
-    # Construcción de la interfaz (sidebar y contenido comienzan en fila 0,
-    # sin ninguna franja/espacio por encima)
-    # ------------------------------------------------------------------ #
     def _build_layout(self) -> None:
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -186,7 +157,6 @@ class MainWindow(ctk.CTk):
         self.content_header = ContentHeader(self.content_container)
         self.content_header.grid(row=0, column=0, sticky="ew")
 
-        # Páginas apiladas en la misma celda (row=1); se muestra una a la vez.
         self.chat_panel = ChatPanel(
             self.content_container,
             on_send_message=self._handle_user_message,
@@ -226,20 +196,11 @@ class MainWindow(ctk.CTk):
         self.status_bar.set_db_status(False)
         self.status_bar.set_user("Administrador")
 
-        # Si el token/endpoint de IA vienen de variables de entorno (o
-        # .env), no tiene sentido esperar a que el usuario presione
-        # "Probar conexión": se conecta sola, reintentando con un
-        # intervalo creciente hasta lograrlo.
         if self._config.ai_credentials_locked:
             self._start_auto_connect_with_retry()
 
-    # ------------------------------------------------------------------ #
-    # Actualizaciones: CheckForUpdates() en segundo plano al iniciar,
-    # SIEMPRE (cada vez que se abre la app) — nunca bloquea la interfaz
-    # ni impide usar la app si falla o no hay conexión.
-    # ------------------------------------------------------------------ #
     def _maybe_check_for_updates_on_startup(self) -> None:
-        self.after(1500, self._run_update_check)  # pequeño delay: no compite con el arranque de la UI
+        self.after(1500, self._run_update_check)
 
     def _run_update_check(self, manual: bool = False) -> None:
         self._update_manager.check_for_updates(
@@ -247,8 +208,6 @@ class MainWindow(ctk.CTk):
         )
 
     def _handle_update_check_result(self, update_info, error, manual: bool = False) -> None:
-        # check_for_updates() corre en un hilo aparte: hay que volver al
-        # hilo principal antes de tocar cualquier widget.
         self.after(0, lambda: self._apply_update_check_result(update_info, error, manual))
 
     def _apply_update_check_result(self, update_info, error, manual: bool = False) -> None:
@@ -258,10 +217,6 @@ class MainWindow(ctk.CTk):
         self._config.update(last_update_check=datetime.now().isoformat(timespec="seconds"))
 
         if error:
-            # Verificación automática (al iniciar): nunca se muestra un
-            # error molesto, se registra en logs y listo. Verificación
-            # MANUAL (el usuario apretó el botón): sí se avisa, porque
-            # quedarse callado ahí se ve como "el botón no hace nada".
             get_logger().warning("Fallo al verificar actualizaciones: %s", error)
             if manual:
                 messagebox.showerror(
@@ -276,7 +231,7 @@ class MainWindow(ctk.CTk):
                     "Buscar actualizaciones",
                     f"Ya tenés instalada la última versión (v{APP_VERSION}).",
                 )
-            return  # ya está en la última versión: no hacer nada más (automática)
+            return
 
         if self._update_dialog is not None:
             if manual:
@@ -284,7 +239,7 @@ class MainWindow(ctk.CTk):
                     "Buscar actualizaciones",
                     "Ya hay una actualización disponible esperando tu respuesta.",
                 )
-            return  # ya hay un diálogo de actualización abierto
+            return
 
         self._update_dialog = UpdateDialog(
             self,
@@ -296,38 +251,22 @@ class MainWindow(ctk.CTk):
         )
 
     def check_for_updates_now(self) -> None:
-        """Disparado manualmente desde Acerca de / Configuración ("Buscar actualizaciones")."""
         self._run_update_check(manual=True)
 
     def _handle_update_remind_later(self) -> None:
         self._update_dialog = None
 
     def _handle_update_ready_to_install(self, installer_path: str) -> None:
-        """
-        La descarga terminó bien: se instala y se cierra la app. El
-        propio instalador reemplaza la versión anterior (MajorUpgrade ya
-        configurado) sin tocar la carpeta de datos de usuario — la
-        configuración, las conversaciones, la Base de Conocimiento y los
-        documentos no se pierden. Si el usuario deja tildada la opción
-        "Iniciar Asistente IA..." en la pantalla final del instalador,
-        la nueva versión se vuelve a abrir sola.
-        """
         self._update_dialog = None
         get_logger().info("Instalando actualización descargada en: %s", installer_path)
         success, error = self._update_manager.install_update(installer_path, silent=False)
 
         if not success:
-            # No se pudo ni lanzar el instalador (ej. msiexec bloqueado,
-            # permisos): se registra el error y la app sigue funcionando
-            # con normalidad, en vez de cerrarse sin haber logrado nada.
             get_logger().error("No se pudo iniciar el instalador: %s", error)
             return
 
         self.after(500, self.destroy)
 
-    # ------------------------------------------------------------------ #
-    # Auto-conexión cuando el token/endpoint vienen de variables de entorno
-    # ------------------------------------------------------------------ #
     AUTO_CONNECT_INITIAL_DELAY_SECONDS = 10
     AUTO_CONNECT_DELAY_INCREMENT_SECONDS = 5
 
@@ -338,7 +277,7 @@ class MainWindow(ctk.CTk):
 
     def _auto_connect_attempt(self, engine_name: str, provider_cls, next_delay: int) -> None:
         if not self.winfo_exists():
-            return  # la ventana ya se cerró: no seguir reintentando
+            return
 
         settings = self._config.settings
 
@@ -366,18 +305,12 @@ class MainWindow(ctk.CTk):
             self.status_bar.set_ai_status(True, engine_name)
             return
 
-        # Sigue sin conectar: se reintenta en `next_delay` segundos, y el
-        # siguiente intento esperará `next_delay + 5` segundos, y así
-        # sucesivamente, hasta lograr conectar.
         self.content_header.set_connection_state("disconnected")
         self.status_bar.set_ai_status(False, engine_name)
         self.after(
             next_delay * 1000,
             lambda: self._auto_connect_attempt(engine_name, provider_cls, next_delay + self.AUTO_CONNECT_DELAY_INCREMENT_SECONDS),
         )
-    # Navegación por páginas (todo dentro del mismo Frame principal,
-    # nunca se abre una ventana nueva)
-    # ------------------------------------------------------------------ #
     def _hide_all_pages(self) -> None:
         self.chat_panel.grid_forget()
         self.history_panel.grid_forget()
@@ -386,8 +319,6 @@ class MainWindow(ctk.CTk):
         self.about_page.grid_forget()
 
     def _handle_navigate(self, key: str) -> None:
-        # Si el usuario estaba en Configuración y navega a otra página,
-        # persistimos los cambios antes de salir de esa vista.
         if self._current_view == "settings" and key != "settings":
             self.settings_page.save()
 
@@ -395,10 +326,6 @@ class MainWindow(ctk.CTk):
         self._hide_all_pages()
 
         if key in ("home", "new_chat"):
-            # Home = Chat: ambos muestran el mismo saludo y quedan listos
-            # para escribir de inmediato. La conversación se crea recién
-            # al primer mensaje (creación perezosa, evita conversaciones
-            # vacías en el Historial).
             self._active_conversation_id = None
             self.chat_panel.grid(row=1, column=0, sticky="nsew")
             self.chat_panel.show_home(build_greeting(self._display_name))
@@ -418,32 +345,24 @@ class MainWindow(ctk.CTk):
             self.about_page.grid(row=1, column=0, sticky="nsew")
 
     def _handle_delete_conversation(self, conversation_id: int) -> None:
-        """Elimina una conversación de forma permanente y refresca el Historial."""
         self._conversation_service.delete_conversation(conversation_id)
 
         if self._active_conversation_id == conversation_id:
-            # Se borró la conversación que estaba abierta: volver al Home.
             self._active_conversation_id = None
 
         grouped = self._conversation_service.list_grouped_conversations()
         self.history_panel.refresh(grouped)
 
     def _handle_open_conversation(self, conversation_id: int) -> None:
-        """Restaura una conversación existente (NO crea una nueva)."""
         self._active_conversation_id = conversation_id
         messages = self._conversation_service.get_conversation_messages(conversation_id)
 
-        self._current_view = "new_chat"  # se comporta como vista de chat activo
+        self._current_view = "new_chat"
         self._hide_all_pages()
         self.chat_panel.grid(row=1, column=0, sticky="nsew")
         self.chat_panel.load_conversation(messages)
         self.sidebar.select("history")
 
-    # ------------------------------------------------------------------ #
-    # Adjuntar archivo (queda PENDIENTE hasta que se presione Enviar; ver
-    # _handle_user_message para dónde se lee y se usa como contexto de
-    # esa pregunta puntual — no se persiste en la Base de Conocimiento)
-    # ------------------------------------------------------------------ #
     def _handle_attach_file(self) -> None:
         file_path = filedialog.askopenfilename(
             title="Adjuntar archivo",
@@ -453,12 +372,8 @@ class MainWindow(ctk.CTk):
             ],
         )
         if not file_path:
-            return  # el usuario canceló el diálogo
+            return
 
-        # Se valida el tipo de archivo ACÁ (antes de mostrarlo como
-        # "pendiente"), para avisar de inmediato si no es soportado, en
-        # vez de dejar que el usuario escriba su pregunta y recién
-        # enterarse del error al presionar Enviar.
         extension = Path(file_path).suffix.lower()
         if extension not in SUPPORTED_TEXT_EXTENSIONS:
             supported = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
@@ -473,17 +388,10 @@ class MainWindow(ctk.CTk):
         self.chat_panel.input_bar.set_pending_attachment(file_path, Path(file_path).name)
 
     def _handle_db_connection_result(self, connected: bool, message: str) -> None:
-        """Se llama desde la tarjeta de Base de Datos en Configuración."""
         self.status_bar.set_db_status(connected, "SQL Server")
 
-    # ------------------------------------------------------------------ #
-    # Envío de mensajes (con persistencia real en SQLite y respuesta real
-    # del proveedor de IA cuando hay uno conectado)
-    # ------------------------------------------------------------------ #
     def _handle_user_message(self, text: str, attachment_path: str | None = None) -> None:
         if self._active_conversation_id is None:
-            # Red de seguridad: si por algún motivo no hay conversación activa
-            # (por ejemplo, se escribió desde Inicio), se crea una al vuelo.
             conversation = self._conversation_service.start_new_conversation()
             self._active_conversation_id = conversation.id
 
@@ -498,18 +406,6 @@ class MainWindow(ctk.CTk):
         self._dispatch_ai_response(text, extra_context=attachment_context)
 
     def _consume_pending_attachment(self, attachment_path: str) -> str:
-        """
-        Lee el archivo que el usuario adjuntó a ESTE mensaje (elegido
-        antes de presionar Enviar, ver ChatInputBar.set_pending_attachment)
-        y lo devuelve como texto de contexto para responder esta
-        pregunta puntual.
-
-        A diferencia de la Base de Conocimiento (`add_document`), esto
-        NO se persiste en knowledge.db: el archivo no queda disponible
-        para preguntas futuras, ni buscable, ni aparece en "Base de
-        Conocimiento" de Configuración — es contexto de una sola vez,
-        para esta respuesta.
-        """
         try:
             filename, content = self._knowledge_base.read_ephemeral_attachment(attachment_path)
         except (UnsupportedFileTypeError, FileNotFoundError, OSError) as exc:
@@ -530,35 +426,12 @@ class MainWindow(ctk.CTk):
         return f"--- Contenido de {filename} (adjuntado a este mensaje) ---\n{content[:max_chars]}"
 
     def _handle_regenerate_message(self, question: str) -> None:
-        """
-        Vuelve a pedir una respuesta para `question` (la pregunta que
-        precedía a la burbuja donde se apretó "↻ Regenerar"), sin
-        agregar un nuevo mensaje de usuario — el usuario ya la escribió
-        antes; solo se agrega una nueva respuesta debajo.
-        """
         if self._active_conversation_id is None:
             return
         self._stop_requested = False
         self._dispatch_ai_response(question)
 
     def _dispatch_ai_response(self, question: str, extra_context: str = "") -> None:
-        """
-        Lógica compartida entre un mensaje nuevo y un "Regenerar": busca
-        contexto en la Base de Conocimiento, detecta ambigüedad, y llama
-        al proveedor real (streaming) o al camino sin conexión.
-
-        `extra_context`, si se pasa, es contenido adjuntado a ESTA
-        pregunta puntual (ver `_consume_pending_attachment`) — se suma
-        al contexto de la Base de Conocimiento, pero no proviene de ahí
-        ni queda guardado para preguntas futuras.
-        """
-        # Antes de generar/consultar la IA: si la pregunta es ambigua entre
-        # dos o más procedimientos de la Base de Conocimiento (ej. "cambiar
-        # la contraseña" podría ser la del correo o la de Zeus), se pregunta
-        # primero a cuál se refiere, en vez de mezclar el contexto de
-        # documentos que no tienen que ver entre sí. Un archivo adjuntado a
-        # esta pregunta puntual (extra_context) ya deja la intención clara,
-        # así que en ese caso no tiene sentido pedir aclaración.
         scored_matches = self._knowledge_base.search_with_scores(question)
         if scored_matches and not extra_context:
             top_score = scored_matches[0][0]
@@ -571,37 +444,51 @@ class MainWindow(ctk.CTk):
             self._ask_clarification(candidates)
             return
 
+        matches = candidates
+        has_context = bool(matches) or bool(extra_context)
+
+        if not has_context:
+            self._refuse_out_of_scope(question)
+            return
+
         self.chat_panel.set_generating(True)
         self.chat_panel.show_typing_indicator()
 
-        matches = candidates
         source_filenames = ", ".join(m.filename for m in matches)
         kb_context = self._knowledge_base.build_context_snippet(matches)
         combined_context = "\n\n".join(part for part in (kb_context, extra_context) if part)
         augmented_text = (
-            f"Usa el siguiente contexto si es relevante:\n"
+            "Respondé ÚNICAMENTE usando la información de este contexto (documentos "
+            "de la Base de Conocimiento / carpeta Training). Si la respuesta a la "
+            "pregunta del usuario no está en este contexto, decí explícitamente que "
+            "no tenés esa información en la Base de Conocimiento — no completes con "
+            "tu conocimiento general, no inventes, y no busques en internet.\n\n"
             f"{combined_context}\n\nPregunta del usuario: {question}"
-            if combined_context
-            else question
         )
 
         if self._active_provider is not None and self._active_provider.is_connected():
             self._start_real_ai_response(question, augmented_text, source_filenames)
         else:
-            # Sin proveedor conectado (Offline o conexión fallida): se explica
-            # la situación en vez de fingir una respuesta.
             self._generating_job = self.after(
                 900, lambda: self._finish_ai_response_placeholder(question, source_filenames)
             )
 
+    _OUT_OF_SCOPE_MESSAGE = (
+        "🔒 No tengo información sobre esto en la Base de Conocimiento (carpeta "
+        "Training). Este asistente está configurado para responder solo con esos "
+        "documentos — no uso conocimiento general ni busco en internet. Si es un "
+        "tema válido, pedile a un administrador que agregue el documento "
+        "correspondiente a la carpeta Training."
+    )
+
+    def _refuse_out_of_scope(self, question: str) -> None:
+        message = self._conversation_service.add_assistant_message(
+            self._active_conversation_id, self._OUT_OF_SCOPE_MESSAGE
+        )
+        self.chat_panel.add_message(message)
+        self._qa_log_service.log(question, self._OUT_OF_SCOPE_MESSAGE, "Fuera de alcance", "")
+
     def _ask_clarification(self, tied_documents) -> None:
-        """
-        Muestra una pregunta de aclaración cuando dos o más procedimientos
-        de la Base de Conocimiento empatan en relevancia. No se llama a
-        la IA ni se registra en el historial de Q&A: es solo una
-        aclaración; la respuesta real del usuario (ej. "Zeus") dispara
-        una nueva búsqueda que, al ser más específica, ya no será ambigua.
-        """
         options = [friendly_name(doc.filename) for doc in tied_documents]
         options_text = " o ".join(f"«{opt}»" for opt in options)
         clarification_text = (
@@ -614,13 +501,6 @@ class MainWindow(ctk.CTk):
         self.chat_panel.add_message(message)
 
     def _build_system_prompt(self) -> str:
-        """
-        Contexto fijo que se manda como mensaje de rol "system" en cada
-        pregunta: quién es el usuario logueado (vía Microsoft). Sin
-        esto, el modelo no tiene ninguna forma de saber quién le habla
-        y responde cosas como "no tengo acceso a información personal"
-        ante preguntas tan simples como "¿cómo me llamo?".
-        """
         if self._display_name:
             return (
                 f"Eres el Asistente IA de La Vianda. La persona que te está escribiendo "
@@ -636,21 +516,11 @@ class MainWindow(ctk.CTk):
         )
 
     def _start_real_ai_response(self, original_text: str, augmented_text: str, source_filenames: str) -> None:
-        """
-        Llama al proveedor real en un hilo aparte para no congelar la
-        interfaz, usando streaming: el texto va apareciendo fragmento a
-        fragmento en la burbuja a medida que llega, en vez de esperar la
-        respuesta completa (como ChatGPT). Si el proveedor no soporta
-        streaming real, `send_message_stream` degrada solo y entrega
-        todo el texto de una vez (ver ai/base_provider.py).
-        """
         provider = self._active_provider
         conversation_id = self._active_conversation_id
         engine_name = provider.name
         system_prompt = self._build_system_prompt()
 
-        # Se crea perezosamente recién cuando llega el primer fragmento
-        # (mientras tanto se sigue viendo el indicador "Pensando...").
         bubble_holder: dict = {}
         accumulated_holder = {"text": ""}
         self._current_stream_state = {
@@ -670,8 +540,6 @@ class MainWindow(ctk.CTk):
                     bubble_holder["bubble"] = self.chat_panel.start_streaming_assistant_bubble()
                 self.chat_panel.append_to_streaming_bubble(bubble_holder["bubble"], delta)
 
-            # on_token se llama desde el hilo de red: los widgets de Tk
-            # solo deben tocarse desde el hilo principal.
             self.after(0, apply_on_ui_thread)
 
         def worker() -> None:
@@ -680,7 +548,7 @@ class MainWindow(ctk.CTk):
                     augmented_text, on_token, should_stop=lambda: self._stop_requested, system_prompt=system_prompt
                 )
                 error_text = None
-            except Exception as exc:  # noqa: BLE001 - cualquier fallo de red/API se muestra al usuario
+            except Exception as exc:
                 final_text = None
                 error_text = str(exc)
 
@@ -704,8 +572,6 @@ class MainWindow(ctk.CTk):
         engine_name: str,
     ) -> None:
         if self._stop_requested or conversation_id != self._active_conversation_id:
-            # El usuario pidió detener, o ya cambió de conversación mientras
-            # se esperaba la respuesta: no se muestra un mensaje fuera de lugar.
             return
 
         self.chat_panel.hide_typing_indicator()
@@ -714,30 +580,21 @@ class MainWindow(ctk.CTk):
 
         if error_text:
             reply_text = f"⚠️ No se pudo obtener respuesta de {engine_name}: {error_text}"
-            # Si el proveedor falló (token vencido, sin red, etc.), reflejarlo
-            # también en el encabezado y la barra de estado.
             self.content_header.set_connection_state("disconnected")
             self.status_bar.set_ai_status(False, engine_name)
         elif reply_text is None:
-            reply_text = ""  # defensivo: no debería ocurrir sin error_text
+            reply_text = ""
 
         message = self._conversation_service.add_assistant_message(conversation_id, reply_text)
 
         if streaming_bubble is not None:
-            # Ya había una burbuja creciendo con el streaming: se reemplaza
-            # el texto plano por el renderizado final en Markdown.
             self.chat_panel.finalize_streaming_bubble(streaming_bubble, message)
         else:
-            # No llegó a crearse (ej. falló antes de recibir ni un token):
-            # se agrega la burbuja (de error) directamente.
             self.chat_panel.add_message(message)
 
-        # Centraliza la pregunta y la respuesta para poder consultarlas con
-        # el tiempo, junto con qué archivos de entrenamiento se usaron.
         self._qa_log_service.log(original_text, reply_text, engine_name, source_filenames)
 
     def _finish_ai_response_placeholder(self, original_text: str, source_filenames: str = "") -> None:
-        """Respuesta simulada, solo quando no hay ningún proveedor de IA conectado."""
         self.chat_panel.hide_typing_indicator()
         self.chat_panel.set_generating(False)
         self._generating_job = None
@@ -760,10 +617,6 @@ class MainWindow(ctk.CTk):
         self.chat_panel.hide_typing_indicator()
         self.chat_panel.set_generating(False)
 
-        # Si ya había una respuesta en streaming a mitad de camino, se
-        # conserva el texto parcial recibido hasta ahora (marcado como
-        # interrumpido) en vez de perderlo o dejarlo en un estado a medio
-        # renderizar sin botones de Copiar/Regenerar.
         state = self._current_stream_state
         self._current_stream_state = None
 

@@ -14,16 +14,7 @@ _LOGO_PATH = get_asset_path("logo.png")
 _LOGO_WATERMARK_PATH = get_asset_path("logo_watermark.png")
 
 
-# ---------------------------------------------------------------------- #
-# Home = Chat: saludo personalizado (sin conversación activa todavía)
-# ---------------------------------------------------------------------- #
 class HomeGreeting(ctk.CTkFrame):
-    """
-    Lo que se ve "arriba" del chat cuando no hay conversación activa:
-    ícono + saludo grande + subtítulo. La caja de texto de abajo
-    (ChatInputBar) NO es parte de este widget: vive en ChatPanel y está
-    siempre visible, tanto acá como durante una conversación.
-    """
 
     def __init__(
         self,
@@ -36,18 +27,14 @@ class HomeGreeting(ctk.CTkFrame):
         self._build_ui(greeting_text, subtitle_text)
 
     def _build_ui(self, greeting_text: str, subtitle_text: str) -> None:
-        # Marca de agua de fondo cubriendo TODO el espacio disponible
-        # (no solo una esquina): se recalcula cada vez que el panel
-        # cambia de tamaño, manteniendo la proporción de la imagen
-        # (recorta el sobrante, como "background-size: cover" en CSS).
         try:
             self._watermark_source = Image.open(_LOGO_WATERMARK_PATH).convert("RGBA")
             self._watermark_label = ctk.CTkLabel(self, text="")
             self._watermark_label.place(relx=0, rely=0, relwidth=1, relheight=1)
-            self._watermark_label.lower()  # detrás del resto del contenido
+            self._watermark_label.lower()
             self.bind("<Configure>", self._update_watermark, add="+")
         except Exception:
-            self._watermark_source = None  # si el archivo no está disponible, se sigue sin ella
+            self._watermark_source = None
 
         container = ctk.CTkFrame(self, fg_color="transparent")
         container.place(relx=0.5, rely=0.42, anchor="center")
@@ -61,7 +48,7 @@ class HomeGreeting(ctk.CTkFrame):
             logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(28, 28))
             ctk.CTkLabel(icon_circle, image=logo_image, text="").place(relx=0.5, rely=0.5, anchor="center")
         except Exception:
-            pass  # si el logo no está disponible, se sigue sin el ícono
+            pass
 
         self.greeting_label = ctk.CTkLabel(
             container,
@@ -85,23 +72,18 @@ class HomeGreeting(ctk.CTkFrame):
         width = self.winfo_width()
         height = self.winfo_height()
         if width < 2 or height < 2:
-            return  # todavía no tiene un tamaño real asignado
+            return
 
-        # Evita recalcular si el tamaño no cambió realmente (Configure
-        # también se dispara por otros motivos, no solo al redimensionar).
         if getattr(self, "_last_watermark_size", None) == (width, height):
             return
         self._last_watermark_size = (width, height)
 
         cover = self._make_cover_image(self._watermark_source, width, height)
-        # Se guarda la referencia en self: si no, Python la recolecta
-        # como basura apenas termina la función y la imagen desaparece.
         self._watermark_image = ctk.CTkImage(cover, size=(width, height))
         self._watermark_label.configure(image=self._watermark_image)
 
     @staticmethod
     def _make_cover_image(image: Image.Image, target_w: int, target_h: int) -> Image.Image:
-        """Redimensiona + recorta manteniendo proporción, cubriendo todo target_w x target_h (como CSS 'cover')."""
         img_ratio = image.width / image.height
         target_ratio = target_w / max(target_h, 1)
         if img_ratio > target_ratio:
@@ -119,22 +101,7 @@ class HomeGreeting(ctk.CTkFrame):
         self.greeting_label.configure(text=greeting_text)
 
 
-# ---------------------------------------------------------------------- #
-# Burbuja de mensaje (Markdown real, Copiar, Regenerar, streaming)
-# ---------------------------------------------------------------------- #
 class MessageBubble(ctk.CTkFrame):
-    """
-    Burbuja individual de un mensaje.
-
-    - Renderiza Markdown real (encabezados, código, listas, tablas;
-      ver limitaciones documentadas en ui/markdown_blocks.py).
-    - Botón "Copiar" en toda burbuja.
-    - Botón "↻ Regenerar" en burbujas de la IA (vuelve a pedir la
-      respuesta para la misma pregunta anterior).
-    - Modo `streaming=True`: arranca con texto plano vacío que se va
-      completando con `append_streaming_text()`, y al llamar
-      `finalize()` se reemplaza por el renderizado final en Markdown.
-    """
 
     def __init__(self, master, message: Message, on_regenerate=None, streaming: bool = False, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -175,13 +142,6 @@ class MessageBubble(ctk.CTkFrame):
 
         self._footer = ctk.CTkFrame(self._bubble, fg_color="transparent")
         self._footer.pack(padx=14, pady=(0, 8), anchor="e", fill="x")
-        # IMPORTANTE: se arma con grid, no con pack+"spacer con expand=True".
-        # Un frame con expand=True dentro de un CTkScrollableFrame se queda
-        # pegado en 200px de alto (el valor por defecto de CTkFrame) en vez
-        # de ajustarse al contenido — es un bug real de esa combinación
-        # específica (verificado en aislamiento). grid con una columna de
-        # peso logra el mismo layout (hora a la izquierda, botones a la
-        # derecha) sin ese problema.
         self._footer.grid_columnconfigure(1, weight=1)
 
         self._time_label = ctk.CTkLabel(
@@ -191,14 +151,11 @@ class MessageBubble(ctk.CTkFrame):
             text_color=self._text_color,
         )
         self._time_label.grid(row=0, column=0, sticky="w")
-        # Columna 1 queda vacía a propósito: con weight=1 actúa como el
-        # espacio flexible entre la hora y los botones.
 
         if not self._is_streaming:
             self._build_action_buttons()
 
     def _build_action_buttons(self) -> None:
-        """Botones Copiar/Regenerar. Se agregan al terminar el streaming (si aplica)."""
         hover = theme.PRIMARY_RED_HOVER if self._is_user else theme.BORDER_LIGHT
 
         if not self._is_user and self._on_regenerate is not None:
@@ -233,21 +190,17 @@ class MessageBubble(ctk.CTkFrame):
             self.clipboard_clear()
             self.clipboard_append(self._message.content)
         except Exception:
-            pass  # sin portapapeles disponible (ej. entorno de pruebas): no es crítico
+            pass
 
     def _handle_regenerate(self) -> None:
         if self._on_regenerate:
             self._on_regenerate()
 
-    # ------------------------------------------------------------------ #
-    # API de streaming
-    # ------------------------------------------------------------------ #
     def append_streaming_text(self, delta: str) -> None:
         if self._stream_label is not None:
             self._stream_label.configure(text=self._stream_label.cget("text") + delta)
 
     def finalize(self, final_message: Message) -> None:
-        """Reemplaza el texto plano en streaming por el renderizado final en Markdown."""
         self._message = final_message
         self._is_streaming = False
 
@@ -263,11 +216,7 @@ class MessageBubble(ctk.CTkFrame):
         self._build_action_buttons()
 
 
-# ---------------------------------------------------------------------- #
-# Indicador de "Pensando..." (antes de que llegue el primer token)
-# ---------------------------------------------------------------------- #
 class TypingIndicator(ctk.CTkFrame):
-    """Indicador animado mientras se espera la respuesta de la IA."""
 
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -304,24 +253,10 @@ class TypingIndicator(ctk.CTkFrame):
         self._job = self.after(450, self._animate)
 
 
-# ---------------------------------------------------------------------- #
-# Caja de entrada de texto (siempre visible, incluso en el Home)
-# ---------------------------------------------------------------------- #
 class ChatInputBar(ctk.CTkFrame):
-    """
-    Caja inferior de composición de mensajes.
 
-    Adjuntar un archivo (📎) ya NO lo sube a la Base de Conocimiento en
-    el momento de elegirlo: solo lo deja "pendiente" (se ve como un
-    chip arriba del cuadro de texto, con opción de quitarlo). El
-    archivo recién se usa cuando el usuario efectivamente presiona
-    Enviar — y en ese punto se usa como contexto para responder ESA
-    pregunta puntual, no como conocimiento permanente (ver
-    `services/knowledge_base.read_ephemeral_attachment`).
-    """
-
-    _MIN_HEIGHT = 44   # altura para 1 línea (igual que antes, sin cambios visuales en reposo)
-    _MAX_HEIGHT = 160  # a partir de acá, sigue creciendo el contenido pero con scroll interno
+    _MIN_HEIGHT = 44
+    _MAX_HEIGHT = 160
 
     def __init__(self, master, on_send=None, on_stop=None, on_attach=None, **kwargs):
         super().__init__(master, fg_color=theme.SURFACE_WHITE, corner_radius=0, **kwargs)
@@ -336,7 +271,6 @@ class ChatInputBar(ctk.CTkFrame):
     def _build_ui(self) -> None:
         self.grid_columnconfigure(1, weight=1)
 
-        # Chip del archivo adjuntado pendiente (oculto hasta que haya uno).
         self.attachment_chip = ctk.CTkFrame(
             self, fg_color=theme.BACKGROUND_LIGHT, corner_radius=theme.CORNER_RADIUS
         )
@@ -358,7 +292,6 @@ class ChatInputBar(ctk.CTkFrame):
             command=self.clear_pending_attachment,
         )
         self.attachment_remove_button.pack(side="left", padx=(0, 8), pady=6)
-        # No se hace .grid() todavía: se muestra recién en set_pending_attachment().
 
         self.attach_button = ctk.CTkButton(
             self,
@@ -389,11 +322,8 @@ class ChatInputBar(ctk.CTkFrame):
         self.text_entry.bind("<FocusIn>", self._clear_placeholder)
         self.text_entry.bind("<KeyRelease>", self._on_key_release)
         self.text_entry.bind("<Return>", self._handle_return)
-        self.text_entry.bind("<Shift-Return>", lambda e: None)  # deja el salto de línea normal
+        self.text_entry.bind("<Shift-Return>", lambda e: None)
 
-        # Botón de chat de voz (🎤) — deshabilitado hasta que se implemente
-        # (ver Sidebar: "Próximamente"). Mismo tamaño que el de adjuntar
-        # para que ambos tengan presencia visual similar en la barra.
         self.dictate_button = ctk.CTkButton(
             self,
             text="🎤",
@@ -419,9 +349,6 @@ class ChatInputBar(ctk.CTkFrame):
         )
         self.send_button.grid(row=1, column=3, padx=(4, 12), pady=10)
 
-    # ------------------------------------------------------------------ #
-    # Placeholder manual (CTkTextbox no soporta placeholder nativo)
-    # ------------------------------------------------------------------ #
     _PLACEHOLDER = "Pregúntame cualquier cosa sobre La Vianda..."
 
     def _set_placeholder(self) -> None:
@@ -438,12 +365,6 @@ class ChatInputBar(ctk.CTkFrame):
     def _on_key_release(self, _event=None) -> None:
         self._autosize_input()
 
-    # ------------------------------------------------------------------ #
-    # Auto-crecimiento del cuadro de texto (como ChatGPT): arranca en 1
-    # línea y va agrandándose con el contenido, hasta un máximo — pasado
-    # ese máximo, sigue funcionando pero con scroll interno en vez de
-    # seguir creciendo indefinidamente.
-    # ------------------------------------------------------------------ #
     def _autosize_input(self) -> None:
         if getattr(self, "_showing_placeholder", False):
             self._set_input_height(self._MIN_HEIGHT)
@@ -454,10 +375,8 @@ class ChatInputBar(ctk.CTkFrame):
             line_info = self.text_entry._textbox.dlineinfo("1.0")
             line_height = line_info[3] if line_info else 17
         except Exception:
-            return  # cualquier fallo acá no debe romper la escritura/envío de mensajes
+            return
 
-        # Espacio fijo (bordes + padding interno) que ya está incluido en
-        # _MIN_HEIGHT para 1 sola línea; se mantiene constante al crecer.
         chrome_padding = self._MIN_HEIGHT - line_height
         target_height = line_height * max(display_lines, 1) + chrome_padding
         self._set_input_height(max(self._MIN_HEIGHT, min(target_height, self._MAX_HEIGHT)))
@@ -468,7 +387,6 @@ class ChatInputBar(ctk.CTkFrame):
             self.text_entry.configure(height=height)
 
     def _handle_return(self, event) -> str:
-        # Enter envía, Shift+Enter (manejado arriba) permite salto de línea.
         self._handle_send_or_stop()
         return "break"
 
@@ -490,20 +408,11 @@ class ChatInputBar(ctk.CTkFrame):
         if self._on_send:
             self._on_send(text, attachment_path)
 
-    # ------------------------------------------------------------------ #
-    # Adjunto pendiente (elegido, todavía no enviado)
-    # ------------------------------------------------------------------ #
     def _attach_file(self) -> None:
         if self._on_attach:
             self._on_attach()
 
     def set_pending_attachment(self, file_path: str, display_name: str) -> None:
-        """
-        Llamado por MainWindow después de que el usuario elige un
-        archivo válido en el diálogo: solo lo muestra como "pendiente"
-        (chip arriba del input). No se lee ni se procesa todavía —
-        eso pasa recién al presionar Enviar.
-        """
         self._pending_attachment_path = file_path
         self.attachment_label.configure(text=f"📎 {display_name}")
         self.attachment_chip.grid(row=0, column=0, columnspan=4, padx=12, pady=(8, 0), sticky="w")
@@ -512,9 +421,6 @@ class ChatInputBar(ctk.CTkFrame):
         self._pending_attachment_path = None
         self.attachment_chip.grid_forget()
 
-    # ------------------------------------------------------------------ #
-    # Control de estado mientras la IA responde
-    # ------------------------------------------------------------------ #
     def set_generating(self, generating: bool) -> None:
         self._is_generating = generating
         if generating:
@@ -529,11 +435,7 @@ class ChatInputBar(ctk.CTkFrame):
             )
 
 
-# ---------------------------------------------------------------------- #
-# Panel de conversación: Home (saludo) <-> conversación, input siempre visible
-# ---------------------------------------------------------------------- #
 class ChatPanel(ctk.CTkFrame):
-    """Home = Chat. Alterna entre el saludo (sin mensajes) y la conversación."""
 
     def __init__(
         self,
@@ -565,8 +467,6 @@ class ChatPanel(ctk.CTkFrame):
             self, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0
         )
 
-        # El input SIEMPRE está visible: en el Home (para poder escribir de
-        # inmediato, como ChatGPT) y durante toda la conversación.
         self.input_bar = ChatInputBar(
             self,
             on_send=self._handle_user_message,
@@ -575,11 +475,7 @@ class ChatPanel(ctk.CTkFrame):
         )
         self.input_bar.grid(row=1, column=0, sticky="ew")
 
-    # ------------------------------------------------------------------ #
-    # Transición Home <-> conversación
-    # ------------------------------------------------------------------ #
     def show_home(self, greeting_text: str) -> None:
-        """Home = Chat: saludo grande arriba, input ya visible y listo para escribir."""
         self._has_conversation = False
         self._last_user_text = None
         self.messages_container.grid_forget()
@@ -587,7 +483,6 @@ class ChatPanel(ctk.CTkFrame):
         self.home_greeting.grid(row=0, column=0, sticky="nsew")
 
     def start_new_conversation(self) -> None:
-        """Limpia la vista actual y muestra un lienzo de chat vacío."""
         self._has_conversation = True
         self._last_user_text = None
         self.home_greeting.grid_forget()
@@ -599,7 +494,6 @@ class ChatPanel(ctk.CTkFrame):
         self.messages_container.grid(row=0, column=0, sticky="nsew")
 
     def load_conversation(self, messages: list[Message]) -> None:
-        """Restaura una conversación existente completa (todas sus burbujas)."""
         self._has_conversation = True
         self._last_user_text = None
         self.home_greeting.grid_forget()
@@ -614,9 +508,6 @@ class ChatPanel(ctk.CTkFrame):
             self._add_bubble_for_message(message)
         self._scroll_to_bottom()
 
-    # ------------------------------------------------------------------ #
-    # Mensajes
-    # ------------------------------------------------------------------ #
     def _add_bubble_for_message(self, message: Message) -> MessageBubble:
         on_regenerate = None
         if not message.is_user and self._last_user_text is not None and self._on_regenerate_message:
@@ -656,9 +547,6 @@ class ChatPanel(ctk.CTkFrame):
                 pass
             self._typing_indicator = None
 
-    # ------------------------------------------------------------------ #
-    # API de streaming (respuesta que se va completando token a token)
-    # ------------------------------------------------------------------ #
     def start_streaming_assistant_bubble(self) -> MessageBubble:
         if not self._has_conversation:
             self.start_new_conversation()
@@ -692,9 +580,6 @@ class ChatPanel(ctk.CTkFrame):
     def set_generating(self, generating: bool) -> None:
         self.input_bar.set_generating(generating)
 
-    # ------------------------------------------------------------------ #
-    # Callbacks internos
-    # ------------------------------------------------------------------ #
     def _handle_user_message(self, text: str, attachment_path: str | None = None) -> None:
         if self._on_send_message:
             self._on_send_message(text, attachment_path)
@@ -704,11 +589,7 @@ class ChatPanel(ctk.CTkFrame):
             self._on_stop_generation()
 
 
-# ---------------------------------------------------------------------- #
-# Panel de historial (datos reales desde ConversationService)
-# ---------------------------------------------------------------------- #
 class HistoryPanel(ctk.CTkScrollableFrame):
-    """Vista de historial de conversaciones agrupadas (Hoy/Ayer/Últimos 7 días/Este mes/Más antiguas)."""
 
     def __init__(self, master, on_select_conversation=None, on_delete_conversation=None, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
@@ -716,10 +597,6 @@ class HistoryPanel(ctk.CTkScrollableFrame):
         self._on_delete_conversation = on_delete_conversation
 
     def refresh(self, grouped_conversations) -> None:
-        """
-        Reconstruye la lista a partir de una estructura ya agrupada:
-            [("Hoy", [Conversation, ...]), ("Ayer", [...]), ...]
-        """
         for widget in self.winfo_children():
             widget.destroy()
 

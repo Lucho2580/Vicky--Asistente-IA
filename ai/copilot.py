@@ -1,17 +1,3 @@
-"""
-Proveedor de IA: GitHub Copilot (vía GitHub Models).
-
-GitHub Copilot en sí no expone un endpoint público de "chat
-completions" (requiere el flujo OAuth interno de VS Code/Copilot).
-Lo que sí es público y funciona con un simple Personal Access Token
-de GitHub es **GitHub Models** (https://github.com/marketplace/models):
-un catálogo de modelos que se consume con una API compatible con la
-de OpenAI, en `https://models.inference.ai.azure.com/chat/completions`.
-
-Tanto `connect()` (una petición mínima de 1 token, solo para validar
-el token) como `send_message()` (la conversación real) usan ese mismo
-endpoint con peticiones HTTP reales.
-"""
 import json
 from typing import Callable, Optional, Tuple
 
@@ -22,7 +8,6 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class GitHubCopilotProvider(AIProvider):
-    """Integración con GitHub Copilot / GitHub Models (conexión y chat reales)."""
 
     name = "GitHub Copilot"
 
@@ -36,8 +21,6 @@ class GitHubCopilotProvider(AIProvider):
 
         url = self._resolve_url(self._endpoint)
         headers = self._build_headers()
-        # Petición mínima real: 1 solo token de salida, solo para
-        # confirmar que el token es válido y el servicio responde.
         payload = {
             "model": DEFAULT_MODEL,
             "messages": [{"role": "user", "content": "ping"}],
@@ -116,12 +99,8 @@ class GitHubCopilotProvider(AIProvider):
 
         return "".join(collected)
 
-    # ------------------------------------------------------------------ #
-    # Utilidades internas
-    # ------------------------------------------------------------------ #
     @staticmethod
     def _build_messages(message: str, system_prompt: Optional[str]) -> list[dict]:
-        """Antepone un mensaje 'system' (ej. quién es el usuario) si se indica uno."""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -136,7 +115,6 @@ class GitHubCopilotProvider(AIProvider):
 
     @staticmethod
     def _resolve_url(endpoint: str) -> str:
-        """Usa el endpoint configurado por el usuario, o el de GitHub Models por defecto."""
         endpoint = endpoint.strip()
         if not endpoint:
             return DEFAULT_ENDPOINT

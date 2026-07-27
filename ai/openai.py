@@ -1,11 +1,3 @@
-"""
-Proveedor de IA: OpenAI.
-
-`connect()` valida la API Key con un GET real a `/v1/models`.
-`send_message()` usa `/v1/chat/completions` con esa misma API Key para
-obtener una respuesta real del modelo. Ambas son peticiones HTTP
-reales, sin simulaciones.
-"""
 import json
 from typing import Callable, Optional, Tuple
 
@@ -17,7 +9,6 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class OpenAIProvider(AIProvider):
-    """Integración con la API de OpenAI (conexión y chat reales)."""
 
     name = "OpenAI"
 

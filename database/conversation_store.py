@@ -1,16 +1,3 @@
-"""
-Capa de persistencia de conversaciones (SQLite).
-
-Almacena todas las conversaciones y mensajes en un archivo
-`conversations.db` independiente de cualquier otra base de datos que
-la aplicación pueda usar a futuro (SQL Server, etc.). Esta clase es la
-ÚNICA que conoce SQL/SQLite; el resto de la aplicación interactúa
-siempre a través de `services.conversation_service.ConversationService`.
-
-Tablas:
-    conversations(id, title, created_at)
-    messages(id, conversation_id, role, content, timestamp)
-"""
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -43,7 +30,6 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversatio
 
 
 class ConversationStore:
-    """Acceso de bajo nivel (CRUD) a conversations.db."""
 
     def __init__(self, db_path: Path = DB_PATH) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,9 +39,6 @@ class ConversationStore:
         self._connection.executescript(_SCHEMA)
         self._connection.commit()
 
-    # ------------------------------------------------------------------ #
-    # Conversaciones
-    # ------------------------------------------------------------------ #
     def create_conversation(self, title: str = "Nueva conversación") -> Conversation:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self._connection.execute(
@@ -109,13 +92,9 @@ class ConversationStore:
         )
 
     def delete_conversation(self, conversation_id: int) -> None:
-        """Elimina la conversación; sus mensajes se borran solos (ON DELETE CASCADE)."""
         self._connection.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
         self._connection.commit()
 
-    # ------------------------------------------------------------------ #
-    # Mensajes
-    # ------------------------------------------------------------------ #
     def add_message(self, conversation_id: int, role: str, content: str) -> Message:
         now = datetime.now().isoformat(timespec="seconds")
         self._connection.execute(
@@ -140,7 +119,6 @@ class ConversationStore:
 
 
 def _extract_time(iso_timestamp: str) -> str:
-    """Extrae HH:MM de un timestamp ISO completo, para mostrar en las burbujas."""
     try:
         return datetime.fromisoformat(iso_timestamp).strftime("%H:%M")
     except ValueError:

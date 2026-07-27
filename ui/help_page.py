@@ -1,9 +1,3 @@
-"""
-Página de Ayuda: guía rápida de uso del Vicky Consulting.
-
-Se muestra dentro del panel principal (igual que Configuración), no en
-una ventana aparte.
-"""
 import customtkinter as ctk
 
 from ui import theme
@@ -11,7 +5,6 @@ from ui.settings_window import Card
 
 
 class HelpPage(ctk.CTkScrollableFrame):
-    """Guía rápida de uso, organizada en tarjetas por tema."""
 
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)

@@ -1,20 +1,9 @@
-"""
-Panel de estado inferior.
-
-Muestra tres indicadores: estado de la IA, estado de la base de datos
-y usuario conectado. Los dos primeros se muestran como "chips" (punto
-+ texto, con fondo pastel del color correspondiente) en vez de un
-punto de color suelto — se lee más rápido de un vistazo. Cada uno se
-puede actualizar dinámicamente desde el código (por ejemplo, cuando se
-conecte un motor de IA real o una base de datos SQL Server).
-"""
 import customtkinter as ctk
 
 from ui import theme
 
 
 class StatusChip(ctk.CTkFrame):
-    """Píldora de estado: punto de color + texto, con fondo pastel a tono."""
 
     def __init__(self, master, label: str, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -55,7 +44,6 @@ class StatusChip(ctk.CTkFrame):
 
 
 class StatusBar(ctk.CTkFrame):
-    """Barra inferior con el estado de IA, base de datos y usuario."""
 
     def __init__(self, master, **kwargs):
         super().__init__(
@@ -84,9 +72,6 @@ class StatusBar(ctk.CTkFrame):
         )
         self.user_status.grid(row=0, column=3, padx=20, pady=8, sticky="e")
 
-    # ------------------------------------------------------------------ #
-    # API pública para actualizar el estado desde el resto de la app
-    # ------------------------------------------------------------------ #
     def set_ai_status(self, connected: bool, engine_name: str = "") -> None:
         text = f"Conectada · {engine_name}" if connected and engine_name else ("Conectada" if connected else "Desconectado")
         self.ai_status.set_state(connected, text)

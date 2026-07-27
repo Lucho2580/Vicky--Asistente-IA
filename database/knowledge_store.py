@@ -1,17 +1,3 @@
-"""
-Capa de persistencia de la Base de Conocimiento (SQLite).
-
-Almacena, en un archivo `knowledge.db` independiente de
-`conversations.db`:
-
-    training_files      -> archivos subidos para servir de contexto/entrenamiento
-    qa_log              -> cada pregunta y respuesta, centralizada
-    connection_log      -> historial de cada intento de conexión (IA/BD)
-
-Esta es la ÚNICA clase que conoce SQL/SQLite para estos datos; el
-resto de la aplicación interactúa a través de los servicios en
-`services/`.
-"""
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -62,7 +48,6 @@ _TRAINING_FILES_COLUMNS = (
 
 
 class KnowledgeStore:
-    """Acceso de bajo nivel (CRUD) a knowledge.db."""
 
     def __init__(self, db_path: Path = KNOWLEDGE_DB_PATH) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,12 +58,6 @@ class KnowledgeStore:
         self._migrate_schema()
 
     def _migrate_schema(self) -> None:
-        """
-        Agrega columnas nuevas a bases de datos ya existentes (creadas
-        antes de que existiera la sincronización con la carpeta
-        Training). `CREATE TABLE IF NOT EXISTS` no modifica una tabla
-        que ya existe, así que hace falta este paso aparte.
-        """
         existing_columns = {
             row["name"] for row in self._connection.execute("PRAGMA table_info(training_files)").fetchall()
         }
@@ -105,9 +84,6 @@ class KnowledgeStore:
             source_mtime=row["source_mtime"] or 0.0,
         )
 
-    # ------------------------------------------------------------------ #
-    # training_files
-    # ------------------------------------------------------------------ #
     def add_training_file(
         self,
         filename: str,
@@ -145,7 +121,6 @@ class KnowledgeStore:
         return [self._row_to_training_file(row) for row in rows]
 
     def list_training_files_from_folder(self) -> List[TrainingFile]:
-        """Solo los archivos gestionados automáticamente por la carpeta Training."""
         rows = self._connection.execute(
             f"SELECT {_TRAINING_FILES_COLUMNS} FROM training_files WHERE source_path != '' "
             "ORDER BY filename ASC"
@@ -153,37 +128,9 @@ class KnowledgeStore:
         return [self._row_to_training_file(row) for row in rows]
 
     def search_training_files(self, keywords: List[str], top_k: int = 5) -> List[TrainingFile]:
-        """
-        Búsqueda por palabras clave con puntaje simple de relevancia:
-        cada documento se puntúa por cuántas de las `keywords` aparecen
-        en su contenido o nombre de archivo, y se devuelven los mejores
-        `top_k`. Es una heurística simple (no embeddings/semántica),
-        pero es una coincidencia real, no una comparación de la
-        pregunta completa como una sola cadena (eso nunca encontraría
-        nada, ya que los documentos no contienen la pregunta textual).
-        """
         return [doc for _score, doc in self.search_training_files_scored(keywords, top_k=top_k)]
 
     def search_training_files_scored(self, keywords: List[str], top_k: int = 5) -> List[tuple]:
-        """
-        Igual que `search_training_files`, pero devuelve tuplas
-        (puntaje, TrainingFile) en vez de solo los documentos. Se usa
-        para detectar preguntas ambiguas: si los dos primeros resultados
-        empatan en puntaje, no hay un único documento claramente más
-        relevante y conviene preguntarle al usuario a cuál se refiere,
-        en vez de adivinar o mezclar el contexto de ambos.
-
-        El puntaje pondera cada palabra clave de forma inversa a en
-        cuántos documentos aparece (similar a TF-IDF): una palabra que
-        aparece en todos los documentos (ej. "contraseña" en varios
-        procedimientos distintos) no debería ayudar a decidir cuál es
-        el más relevante; una palabra que aparece en pocos documentos
-        (ej. "zeus") sí debería pesar mucho más para esos documentos.
-        Además se cuenta cuántas veces aparece cada palabra dentro del
-        documento (no solo si aparece o no), para que un documento que
-        trata el tema a fondo puntúe más que uno que solo lo menciona
-        de pasada.
-        """
         if not keywords:
             return []
 
@@ -195,7 +142,6 @@ class KnowledgeStore:
 
         combined_texts = [(row["content_text"] + " " + row["filename"]).lower() for row in rows]
 
-        # Frecuencia de documentos que contienen cada palabra clave.
         doc_frequency = {
             kw: sum(1 for text in combined_texts if kw in text) for kw in keywords
         }
@@ -233,9 +179,6 @@ class KnowledgeStore:
         self._connection.execute("DELETE FROM training_files WHERE id = ?", (file_id,))
         self._connection.commit()
 
-    # ------------------------------------------------------------------ #
-    # qa_log (preguntas y respuestas centralizadas)
-    # ------------------------------------------------------------------ #
     def log_qa(self, question: str, answer: str, engine: str, source_filenames: str = "") -> QARecord:
         now = datetime.now().isoformat(timespec="seconds")
         cursor = self._connection.execute(
@@ -274,9 +217,6 @@ class KnowledgeStore:
         ).fetchall()
         return [QARecord(**dict(row)) for row in rows]
 
-    # ------------------------------------------------------------------ #
-    # connection_log (historial de conexiones IA/BD)
-    # ------------------------------------------------------------------ #
     def log_connection_attempt(
         self, category: str, target_name: str, success: bool, message: str
     ) -> ConnectionLogEntry:

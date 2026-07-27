@@ -13,9 +13,9 @@ _CODE_FONT_FAMILY = "Consolas"
 
 @dataclass
 class _Block:
-    kind: str  # "heading" | "code" | "list" | "table" | "paragraph"
+    kind: str
     content: str
-    level: int = 0  # solo para "heading"
+    level: int = 0
 
 
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)")
@@ -41,25 +41,22 @@ def _parse_blocks(markdown_text: str) -> List[_Block]:
             i += 1
             continue
 
-        # Bloque de código ```...```
         if line.strip().startswith("```"):
             i += 1
             code_lines = []
             while i < n and not lines[i].strip().startswith("```"):
                 code_lines.append(lines[i])
                 i += 1
-            i += 1  # saltar la línea de cierre ```
+            i += 1
             blocks.append(_Block("code", "\n".join(code_lines)))
             continue
 
-        # Encabezados
         heading_match = _HEADING_RE.match(line)
         if heading_match:
             blocks.append(_Block("heading", heading_match.group(2).strip(), level=len(heading_match.group(1))))
             i += 1
             continue
 
-        # Tabla: una línea con "|" seguida de una línea separadora (---|---)
         if "|" in line and i + 1 < n and _TABLE_SEPARATOR_RE.match(lines[i + 1]) and "-" in lines[i + 1]:
             table_lines = [line]
             i += 1
@@ -69,7 +66,6 @@ def _parse_blocks(markdown_text: str) -> List[_Block]:
             blocks.append(_Block("table", "\n".join(table_lines)))
             continue
 
-        # Lista con viñetas o numerada
         if _LIST_ITEM_RE.match(line):
             list_lines = []
             while i < n and (_LIST_ITEM_RE.match(lines[i]) or lines[i].strip() == ""):
@@ -79,8 +75,6 @@ def _parse_blocks(markdown_text: str) -> List[_Block]:
             blocks.append(_Block("list", "\n".join(list_lines)))
             continue
 
-        # Párrafo normal: junta líneas seguidas hasta encontrar una línea
-        # vacía o el inicio de otro tipo de bloque.
         paragraph_lines = [line]
         i += 1
         while (
@@ -98,14 +92,12 @@ def _parse_blocks(markdown_text: str) -> List[_Block]:
 
 
 def _strip_inline_markers(text: str) -> str:
-    """Quita ** y ` de texto en línea (ver limitación conocida en el docstring del módulo)."""
     text = _BOLD_INLINE_RE.sub(r"\1", text)
     text = _CODE_INLINE_RE.sub(r"\1", text)
     return text
 
 
 def render_markdown(parent, markdown_text: str, text_color: str, max_width: int = 420) -> None:
-    """Construye los widgets necesarios dentro de `parent` para mostrar `markdown_text`."""
     blocks = _parse_blocks(markdown_text) or [_Block("paragraph", markdown_text)]
 
     for block in blocks:
@@ -151,9 +143,6 @@ def _render_code(parent, block: _Block, max_width: int) -> None:
 
 
 def _render_table(parent, block: _Block, text_color: str) -> None:
-    # Se omite la línea separadora (---|---) y se preserva el resto tal
-    # cual, en fuente monoespaciada: es una aproximación razonable a una
-    # tabla real sin construir un widget de grilla completo.
     lines = [line for line in block.content.splitlines() if not _TABLE_SEPARATOR_RE.match(line) or "-" not in line]
     table_frame = ctk.CTkFrame(parent, fg_color=theme.BACKGROUND_LIGHT, corner_radius=8)
     table_frame.pack(fill="x", pady=4, anchor="w")
