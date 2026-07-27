@@ -39,7 +39,7 @@ class LoginOverlay(ctk.CTkFrame):
         logo_container.place(relx=0.5, rely=0.5, anchor="center")
 
         try:
-            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(96, 96))
+            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(160, 160))
             logo_label = ctk.CTkLabel(logo_container, image=logo_image, text="")
             logo_label.pack(pady=(0, 18))
         except Exception:

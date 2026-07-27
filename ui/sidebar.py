@@ -62,7 +62,7 @@ class Sidebar(ctk.CTkFrame):
         header.grid(row=0, column=0, padx=16, pady=(20, 18), sticky="w")
 
         try:
-            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(24, 24))
+            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(36, 36))
             ctk.CTkLabel(header, image=logo_image, text="").pack(side="left", padx=(0, 8))
         except Exception:
             pass

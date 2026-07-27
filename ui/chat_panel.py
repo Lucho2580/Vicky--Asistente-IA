@@ -41,11 +41,11 @@ class HomeGreeting(ctk.CTkFrame):
 
         try:
             icon_circle = ctk.CTkFrame(
-                container, width=56, height=56, corner_radius=28, fg_color=theme.PRIMARY_RED_LIGHT
+                container, width=76, height=76, corner_radius=38, fg_color=theme.PRIMARY_RED_LIGHT
             )
             icon_circle.pack(pady=(0, 14))
             icon_circle.pack_propagate(False)
-            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(28, 28))
+            logo_image = ctk.CTkImage(Image.open(_LOGO_PATH), size=(44, 44))
             ctk.CTkLabel(icon_circle, image=logo_image, text="").place(relx=0.5, rely=0.5, anchor="center")
         except Exception:
             pass
