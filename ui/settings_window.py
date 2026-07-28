@@ -67,8 +67,6 @@ class Card(ctk.CTkFrame):
 
 class SettingsPage(ctk.CTkScrollableFrame):
 
-    _SCALE_OPTIONS = ["90%", "100%", "110%", "125%"]
-
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
         self._config = AppConfig()
@@ -91,48 +89,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
         )
         subtitle.pack(anchor="w", padx=24, pady=(0, 16))
 
-        self._build_appearance_card()
         self._build_updates_card()
-
-    def _build_appearance_card(self) -> None:
-        settings = self._config.settings
-        card = Card(self, "APARIENCIA")
-        card.pack(fill="x", padx=24, pady=12)
-
-        self.theme_switch = card.add_field(
-            "Tema",
-            ctk.CTkSegmentedButton,
-            values=["Claro", "Oscuro"],
-            command=self._handle_theme_change,
-            selected_color=theme.PRIMARY_RED,
-            selected_hover_color=theme.PRIMARY_RED_HOVER,
-        )
-        self.theme_switch.set("Oscuro" if settings.theme == "dark" else "Claro")
-
-        scale_value = settings.ui_scale if settings.ui_scale in self._SCALE_OPTIONS else "100%"
-        self.scale_menu = card.add_field(
-            "Escala de la interfaz",
-            ctk.CTkOptionMenu,
-            values=self._SCALE_OPTIONS,
-            command=self._handle_scale_change,
-            width=110,
-        )
-        self.scale_menu.set(scale_value)
-
-        card.add_footer_spacer()
-
-    def _handle_theme_change(self, value: str) -> None:
-        theme_value = "dark" if value == "Oscuro" else "light"
-        ctk.set_appearance_mode(theme_value)
-        self._config.update(theme=theme_value)
-
-    def _handle_scale_change(self, value: str) -> None:
-        try:
-            factor = int(value.rstrip("%")) / 100
-        except ValueError:
-            factor = 1.0
-        ctk.set_widget_scaling(factor)
-        self._config.update(ui_scale=value)
 
     def _build_updates_card(self) -> None:
         settings = self._config.settings

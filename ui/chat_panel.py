@@ -258,20 +258,22 @@ class ChatInputBar(ctk.CTkFrame):
     _MIN_HEIGHT = 44
     _MAX_HEIGHT = 160
 
-    def __init__(self, master, on_send=None, on_stop=None, on_attach=None, on_dictate_toggle=None, **kwargs):
+    def __init__(self, master, on_send=None, on_stop=None, on_attach=None, on_dictate_toggle=None, on_toggle_file_context=None, **kwargs):
         super().__init__(master, fg_color=theme.SURFACE_WHITE, corner_radius=0, **kwargs)
         self._on_send = on_send
         self._on_stop = on_stop
         self._on_attach = on_attach
         self._on_dictate_toggle = on_dictate_toggle
+        self._on_toggle_file_context = on_toggle_file_context
         self._is_generating = False
         self._is_dictating = False
         self._pending_attachment_path: str | None = None
         self._current_height = self._MIN_HEIGHT
+        self._resize_job = None
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=1)
 
         self.attachment_chip = ctk.CTkFrame(
             self, fg_color=theme.BACKGROUND_LIGHT, corner_radius=theme.CORNER_RADIUS
@@ -309,6 +311,21 @@ class ChatInputBar(ctk.CTkFrame):
         )
         self.attach_button.grid(row=1, column=0, padx=(12, 4), pady=10)
 
+        self.file_context_button = ctk.CTkButton(
+            self,
+            text="📌",
+            width=40,
+            height=40,
+            corner_radius=theme.CORNER_RADIUS,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=15),
+            fg_color="transparent",
+            hover_color=theme.PRIMARY_RED_LIGHT,
+            text_color=theme.SIDEBAR_TEXT_DISABLED,
+            state="disabled",
+            command=self._toggle_file_context,
+        )
+        self.file_context_button.grid(row=1, column=1, padx=4, pady=10)
+
         self.text_entry = ctk.CTkTextbox(
             self,
             height=self._MIN_HEIGHT,
@@ -319,7 +336,7 @@ class ChatInputBar(ctk.CTkFrame):
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL),
             wrap="word",
         )
-        self.text_entry.grid(row=1, column=1, padx=4, pady=10, sticky="ew")
+        self.text_entry.grid(row=1, column=2, padx=4, pady=10, sticky="ew")
         self._set_placeholder()
         self.text_entry.bind("<FocusIn>", self._clear_placeholder)
         self.text_entry.bind("<KeyRelease>", self._on_key_release)
@@ -338,7 +355,7 @@ class ChatInputBar(ctk.CTkFrame):
             text_color=theme.TEXT_MUTED,
             command=self._toggle_dictation,
         )
-        self.dictate_button.grid(row=1, column=2, padx=4, pady=10)
+        self.dictate_button.grid(row=1, column=3, padx=4, pady=10)
 
         self.send_button = ctk.CTkButton(
             self,
@@ -349,7 +366,7 @@ class ChatInputBar(ctk.CTkFrame):
             hover_color=theme.PRIMARY_RED_HOVER,
             command=self._handle_send_or_stop,
         )
-        self.send_button.grid(row=1, column=3, padx=(4, 12), pady=10)
+        self.send_button.grid(row=1, column=4, padx=(4, 12), pady=10)
 
     _PLACEHOLDER = "Pregúntame cualquier cosa sobre La Vianda..."
 
@@ -364,7 +381,15 @@ class ChatInputBar(ctk.CTkFrame):
             self.text_entry.configure(text_color=theme.TEXT_DARK)
             self._showing_placeholder = False
 
+    _RESIZE_DEBOUNCE_MS = 60
+
     def _on_key_release(self, _event=None) -> None:
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(self._RESIZE_DEBOUNCE_MS, self._run_debounced_autosize)
+
+    def _run_debounced_autosize(self) -> None:
+        self._resize_job = None
         self._autosize_input()
 
     def _autosize_input(self) -> None:
@@ -404,6 +429,9 @@ class ChatInputBar(ctk.CTkFrame):
 
         attachment_path = self._pending_attachment_path
         self.text_entry.delete("1.0", "end")
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+            self._resize_job = None
         self._set_input_height(self._MIN_HEIGHT)
         self.clear_pending_attachment()
 
@@ -417,6 +445,35 @@ class ChatInputBar(ctk.CTkFrame):
     def _toggle_dictation(self) -> None:
         if self._on_dictate_toggle:
             self._on_dictate_toggle()
+
+    def _toggle_file_context(self) -> None:
+        if self._on_toggle_file_context:
+            self._on_toggle_file_context()
+
+    def set_file_context_state(self, active: bool, enabled: bool) -> None:
+        """
+        Refleja si hay un archivo "fijado" en esta conversación (se
+        puede seguir preguntando sobre él sin volver a adjuntarlo).
+        `enabled` es False hasta que se envía el primer archivo en la
+        conversación — antes de eso el botón queda deshabilitado, como
+        el de dictado antes de tener un motor compatible.
+        """
+        if not enabled:
+            self.file_context_button.configure(
+                state="disabled", fg_color="transparent", text_color=theme.SIDEBAR_TEXT_DISABLED
+            )
+            return
+
+        if active:
+            self.file_context_button.configure(
+                state="normal", fg_color=theme.PRIMARY_RED, text_color="#FFFFFF",
+                hover_color=theme.PRIMARY_RED_HOVER,
+            )
+        else:
+            self.file_context_button.configure(
+                state="normal", fg_color="transparent", text_color=theme.TEXT_MUTED,
+                hover_color=theme.PRIMARY_RED_LIGHT,
+            )
 
     def set_dictating(self, dictating: bool) -> None:
         """
@@ -442,7 +499,7 @@ class ChatInputBar(ctk.CTkFrame):
     def set_pending_attachment(self, file_path: str, display_name: str) -> None:
         self._pending_attachment_path = file_path
         self.attachment_label.configure(text=f"📎 {display_name}")
-        self.attachment_chip.grid(row=0, column=0, columnspan=4, padx=12, pady=(8, 0), sticky="w")
+        self.attachment_chip.grid(row=0, column=0, columnspan=5, padx=12, pady=(8, 0), sticky="w")
 
     def clear_pending_attachment(self) -> None:
         self._pending_attachment_path = None
@@ -472,6 +529,7 @@ class ChatPanel(ctk.CTkFrame):
         on_attach_file=None,
         on_regenerate_message=None,
         on_dictate_toggle=None,
+        on_toggle_file_context=None,
         **kwargs,
     ):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, **kwargs)
@@ -480,6 +538,7 @@ class ChatPanel(ctk.CTkFrame):
         self._on_attach_file = on_attach_file
         self._on_regenerate_message = on_regenerate_message
         self._on_dictate_toggle = on_dictate_toggle
+        self._on_toggle_file_context = on_toggle_file_context
         self._typing_indicator: TypingIndicator | None = None
         self._has_conversation = False
         self._last_user_text: str | None = None
@@ -502,6 +561,7 @@ class ChatPanel(ctk.CTkFrame):
             on_stop=self._handle_stop_requested,
             on_attach=self._on_attach_file,
             on_dictate_toggle=self._on_dictate_toggle,
+            on_toggle_file_context=self._on_toggle_file_context,
         )
         self.input_bar.grid(row=1, column=0, sticky="ew")
 
@@ -609,6 +669,9 @@ class ChatPanel(ctk.CTkFrame):
 
     def set_generating(self, generating: bool) -> None:
         self.input_bar.set_generating(generating)
+
+    def set_file_context_state(self, active: bool, enabled: bool) -> None:
+        self.input_bar.set_file_context_state(active, enabled)
 
     def _handle_user_message(self, text: str, attachment_path: str | None = None) -> None:
         if self._on_send_message:

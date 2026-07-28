@@ -7,6 +7,21 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 
 
+def has_input_device() -> bool:
+    """
+    Chequea si hay al menos un micrófono disponible en este equipo,
+    sin necesidad de empezar a grabar. Se usa en Acerca de para avisar
+    de antemano si el chat de voz va a poder usarse.
+    """
+    try:
+        import sounddevice as sd
+
+        devices = sd.query_devices()
+        return any(device.get("max_input_channels", 0) > 0 for device in devices)
+    except Exception:
+        return False
+
+
 class AudioRecordingError(Exception):
     pass
 

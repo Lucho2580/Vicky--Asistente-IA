@@ -127,6 +127,7 @@ class MainWindow(ctk.CTk):
         self._active_provider = None
         self._offline_queue: list[tuple[int, str]] = []
         self._offline_retry_job = None
+        self._pinned_file_context: dict[int, dict] = {}
         self._generating_job = None
         self._stop_requested = False
         self._current_stream_state: dict | None = None
@@ -172,6 +173,7 @@ class MainWindow(ctk.CTk):
             on_attach_file=self._handle_attach_file,
             on_regenerate_message=self._handle_regenerate_message,
             on_dictate_toggle=self._handle_dictate_toggle,
+            on_toggle_file_context=self._handle_toggle_file_context,
         )
         self.history_panel = HistoryPanel(
             self.content_container,
@@ -185,6 +187,7 @@ class MainWindow(ctk.CTk):
             self.content_container,
             display_name=self._display_name,
             on_check_updates_now=self.check_for_updates_now,
+            get_ai_status=self._get_ai_status_for_about,
         )
 
         self.chat_panel.grid(row=1, column=0, sticky="nsew")
@@ -510,6 +513,7 @@ class MainWindow(ctk.CTk):
             self._active_conversation_id = None
             self.chat_panel.grid(row=1, column=0, sticky="nsew")
             self.chat_panel.show_home(build_greeting(self._display_name))
+            self._update_file_context_button()
 
         elif key == "history":
             self.history_panel.grid(row=1, column=0, sticky="nsew")
@@ -524,6 +528,12 @@ class MainWindow(ctk.CTk):
 
         elif key == "about":
             self.about_page.grid(row=1, column=0, sticky="nsew")
+            self.about_page.refresh()
+
+    def _get_ai_status_for_about(self) -> tuple:
+        if self._active_provider is not None and self._active_provider.is_connected():
+            return True, self._active_provider.name
+        return False, self._config.settings.ai_engine or "Sin configurar"
 
     def _handle_export_conversation(self, conversation_id: int, title: str) -> None:
         import re
@@ -557,9 +567,11 @@ class MainWindow(ctk.CTk):
 
     def _handle_delete_conversation(self, conversation_id: int) -> None:
         self._conversation_service.delete_conversation(conversation_id)
+        self._pinned_file_context.pop(conversation_id, None)
 
         if self._active_conversation_id == conversation_id:
             self._active_conversation_id = None
+            self._update_file_context_button()
 
         grouped = self._conversation_service.list_grouped_conversations()
         self.history_panel.refresh(grouped)
@@ -573,6 +585,7 @@ class MainWindow(ctk.CTk):
         self.chat_panel.grid(row=1, column=0, sticky="nsew")
         self.chat_panel.load_conversation(messages)
         self.sidebar.select("history")
+        self._update_file_context_button()
 
     SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
@@ -690,6 +703,13 @@ class MainWindow(ctk.CTk):
                 image_base64, image_mime_type = self._consume_pending_image(attachment_path)
             else:
                 attachment_context = self._consume_pending_attachment(attachment_path)
+        else:
+            pinned = self._pinned_file_context.get(self._active_conversation_id)
+            if pinned:
+                attachment_context = (
+                    f"--- Contenido de {pinned['filename']} (archivo fijado en esta conversación) ---\n"
+                    f"{pinned['content']}"
+                )
 
         self._stop_requested = False
         self._dispatch_ai_response(
@@ -724,6 +744,8 @@ class MainWindow(ctk.CTk):
 
         return encoded, mime_type
 
+    _ATTACHMENT_MAX_CHARS = 4000
+
     def _consume_pending_attachment(self, attachment_path: str) -> str:
         try:
             filename, content = self._knowledge_base.read_ephemeral_attachment(attachment_path)
@@ -734,15 +756,50 @@ class MainWindow(ctk.CTk):
             self.chat_panel.add_message(note)
             return ""
 
+        truncated_content = content[: self._ATTACHMENT_MAX_CHARS]
+        self._pinned_file_context[self._active_conversation_id] = {
+            "filename": filename,
+            "content": truncated_content,
+        }
+        self._update_file_context_button()
+
         note = self._conversation_service.add_assistant_message(
             self._active_conversation_id,
-            f"📎 Archivo «{filename}» adjuntado a este mensaje (se usa solo para responder esta "
-            f"pregunta; no se guarda en la Base de Conocimiento).",
+            f"📎 Archivo «{filename}» fijado en esta conversación — te puedo seguir respondiendo "
+            f"preguntas sobre él sin que lo vuelvas a adjuntar. No se guarda en la Base de "
+            f"Conocimiento. Tocá el 📌 al lado de adjuntar cuando quieras dejarlo de lado.",
         )
         self.chat_panel.add_message(note)
 
-        max_chars = 4000
-        return f"--- Contenido de {filename} (adjuntado a este mensaje) ---\n{content[:max_chars]}"
+        return f"--- Contenido de {filename} (adjuntado a este mensaje) ---\n{truncated_content}"
+
+    def _update_file_context_button(self) -> None:
+        pinned = self._pinned_file_context.get(self._active_conversation_id)
+        self.chat_panel.set_file_context_state(active=bool(pinned), enabled=bool(pinned))
+
+    def _handle_toggle_file_context(self) -> None:
+        pinned = self._pinned_file_context.get(self._active_conversation_id)
+        if not pinned:
+            return
+
+        confirmed = messagebox.askyesno(
+            "Dejar de lado el archivo",
+            f'¿Querés dejar de preguntar sobre «{pinned["filename"]}»?\n\n'
+            'Elegí "No" si preferís que se mantenga activo y seguir haciendo preguntas sobre él.',
+            parent=self,
+        )
+        if not confirmed:
+            return
+
+        self._pinned_file_context.pop(self._active_conversation_id, None)
+        self._update_file_context_button()
+
+        note = self._conversation_service.add_assistant_message(
+            self._active_conversation_id,
+            f"👍 Listo, dejo de lado «{pinned['filename']}». Si querés preguntar de nuevo sobre "
+            f"él, volvé a adjuntarlo.",
+        )
+        self.chat_panel.add_message(note)
 
     def _handle_regenerate_message(self, question: str) -> None:
         if self._active_conversation_id is None:
