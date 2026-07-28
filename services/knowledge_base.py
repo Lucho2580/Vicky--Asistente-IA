@@ -1,15 +1,18 @@
+import json
+import math
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from core.paths import TRAINING_DIR
 from database.knowledge_store import KnowledgeStore
 from models.training_file import TrainingFile
 
-SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log"}
+SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".pdf", ".docx"}
 
 MAX_CONTENT_LENGTH = 200_000
 MIN_KEYWORD_LENGTH = 3
+SEMANTIC_MATCH_THRESHOLD = 0.25  # similitud coseno mínima para considerar un documento relevante
 
 _STOPWORDS = {
     "que", "cual", "cuales", "cuál", "cuáles", "es", "la", "el", "los", "las",
@@ -24,6 +27,10 @@ class UnsupportedFileTypeError(Exception):
     pass
 
 
+class DocumentExtractionError(Exception):
+    """El archivo tiene una extensión soportada, pero no se pudo leer su contenido (PDF corrupto, escaneado sin texto, .docx dañado, etc.)."""
+
+
 def extract_keywords(text: str) -> List[str]:
     words = re.findall(r"[\wáéíóúñü]+", text.lower(), flags=re.UNICODE)
     return [w for w in words if len(w) >= MIN_KEYWORD_LENGTH and w not in _STOPWORDS]
@@ -33,6 +40,86 @@ def friendly_name(filename: str) -> str:
     stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     words = stem.replace("_", " ").replace("-", " ").split()
     return " ".join(w.capitalize() for w in words) if words else stem
+
+
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def extract_text_from_file(path: Path, extension: str) -> str:
+    """
+    Extrae el texto de un archivo según su extensión. Punto único de
+    extracción usado por add_document, read_ephemeral_attachment y la
+    sincronización de la carpeta Training, para no repetir la lógica
+    (y el día que se agregue un formato nuevo, se agrega una sola vez
+    acá).
+    """
+    if extension == ".pdf":
+        return _extract_text_from_pdf(path)
+    if extension == ".docx":
+        return _extract_text_from_docx(path)
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _extract_text_from_pdf(path: Path) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise DocumentExtractionError(
+            "Falta el paquete 'pypdf' para leer archivos PDF (pip install pypdf)."
+        ) from exc
+
+    try:
+        reader = PdfReader(str(path))
+    except Exception as exc:  # noqa: BLE001 - PDF corrupto, cifrado, etc.
+        raise DocumentExtractionError(f"No se pudo abrir el PDF: {exc}") from exc
+
+    pages_text = []
+    for page in reader.pages:
+        try:
+            pages_text.append(page.extract_text() or "")
+        except Exception:  # noqa: BLE001 - una página rota no debe tirar todo el archivo
+            continue
+
+    text = "\n".join(pages_text).strip()
+    if not text:
+        raise DocumentExtractionError(
+            "El PDF no tiene texto extraíble (probablemente es un escaneo/imagen sin OCR)."
+        )
+    return text
+
+
+def _extract_text_from_docx(path: Path) -> str:
+    try:
+        import docx
+    except ImportError as exc:
+        raise DocumentExtractionError(
+            "Falta el paquete 'python-docx' para leer archivos Word (pip install python-docx)."
+        ) from exc
+
+    try:
+        document = docx.Document(str(path))
+    except Exception as exc:  # noqa: BLE001 - .docx corrupto o no es realmente un docx
+        raise DocumentExtractionError(f"No se pudo abrir el documento Word: {exc}") from exc
+
+    parts = [p.text for p in document.paragraphs if p.text.strip()]
+    for table in document.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                parts.append(row_text)
+
+    text = "\n".join(parts).strip()
+    if not text:
+        raise DocumentExtractionError("El documento Word no tiene texto (¿está vacío?).")
+    return text
 
 
 class KnowledgeBase:
@@ -53,7 +140,7 @@ class KnowledgeBase:
                 f"Por ahora se aceptan: {supported} (PDF/Word quedan para una próxima iteración)."
             )
 
-        content = path.read_text(encoding="utf-8", errors="replace")[:MAX_CONTENT_LENGTH]
+        content = extract_text_from_file(path, extension)[:MAX_CONTENT_LENGTH]
         size_bytes = path.stat().st_size
 
         return self._store.add_training_file(
@@ -76,7 +163,7 @@ class KnowledgeBase:
                 f"Por ahora se aceptan: {supported} (PDF/Word quedan para una próxima iteración)."
             )
 
-        content = path.read_text(encoding="utf-8", errors="replace")[:MAX_CONTENT_LENGTH]
+        content = extract_text_from_file(path, extension)[:MAX_CONTENT_LENGTH]
         return path.name, content
 
     def list_documents(self) -> List[TrainingFile]:
@@ -118,7 +205,7 @@ class KnowledgeBase:
         return summary
 
     def _add_from_training_folder(self, path: Path, mtime: float) -> TrainingFile:
-        content = path.read_text(encoding="utf-8", errors="replace")[:MAX_CONTENT_LENGTH]
+        content = extract_text_from_file(path, path.suffix.lower())[:MAX_CONTENT_LENGTH]
         size_bytes = path.stat().st_size
         return self._store.add_training_file(
             filename=path.name,
@@ -132,11 +219,72 @@ class KnowledgeBase:
     def search(self, query: str, top_k: int = 5) -> List[TrainingFile]:
         return [doc for _score, doc in self.search_with_scores(query, top_k=top_k)]
 
-    def search_with_scores(self, query: str, top_k: int = 5) -> List[tuple]:
+    def search_with_scores(
+        self, query: str, top_k: int = 5, embed_fn: Optional[Callable[[str], Optional[list]]] = None
+    ) -> List[tuple]:
+        """
+        Busca documentos relevantes. Si se pasa `embed_fn` (típicamente
+        el método `.embed()` del proveedor de IA activo) y devuelve un
+        embedding real, se usa similitud semántica — entiende
+        parafraseos y sinónimos que la búsqueda por keywords se pierde
+        (ej. "restablecer mi clave" encuentra un documento que dice
+        "cambiar la contraseña" aunque no compartan ninguna palabra).
+
+        Si `embed_fn` no está disponible (proveedor sin soporte, sin
+        conexión, o la llamada falla) o no encuentra nada por encima del
+        umbral, cae de nuevo a la búsqueda por keywords de siempre — la
+        Base de Conocimiento nunca deja de funcionar por esto.
+        """
+        if embed_fn is not None:
+            semantic_results = self._search_semantic(query, embed_fn, top_k)
+            if semantic_results:
+                return semantic_results
+
         keywords = extract_keywords(query)
         if not keywords:
             return []
         return self._store.search_training_files_scored(keywords, top_k=top_k)
+
+    def _search_semantic(
+        self, query: str, embed_fn: Callable[[str], Optional[list]], top_k: int
+    ) -> List[tuple]:
+        query_embedding = embed_fn(query)
+        if not query_embedding:
+            return []
+
+        docs_with_embeddings = self._store.list_training_files_with_embeddings()
+        if not docs_with_embeddings:
+            return []
+
+        scored: List[tuple] = []
+        for doc, embedding_json in docs_with_embeddings:
+            doc_embedding = self._get_or_compute_embedding(doc, embedding_json, embed_fn)
+            if not doc_embedding:
+                continue
+            similarity = cosine_similarity(query_embedding, doc_embedding)
+            if similarity >= SEMANTIC_MATCH_THRESHOLD:
+                scored.append((round(similarity, 4), doc))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return scored[:top_k]
+
+    def _get_or_compute_embedding(
+        self, doc: TrainingFile, embedding_json: str, embed_fn: Callable[[str], Optional[list]]
+    ) -> Optional[list]:
+        if embedding_json:
+            try:
+                return json.loads(embedding_json)
+            except json.JSONDecodeError:
+                pass  # embedding guardado corrupto: se recalcula abajo
+
+        content = self._store.get_training_file_content(doc.id)
+        if not content:
+            return None
+
+        embedding = embed_fn(content[:8000])
+        if embedding:
+            self._store.update_training_file_embedding(doc.id, json.dumps(embedding))
+        return embedding
 
     def detect_ambiguous_matches(self, query: str, top_k: int = 5) -> List[TrainingFile]:
         scored = self.search_with_scores(query, top_k=top_k)

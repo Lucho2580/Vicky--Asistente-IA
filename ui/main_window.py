@@ -1,4 +1,6 @@
 import threading
+import base64
+import mimetypes
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -7,6 +9,7 @@ import customtkinter as ctk
 from ai.copilot import GitHubCopilotProvider
 from config.app_config import AppConfig
 from core.app_logger import get_logger
+from core.audio_recorder import AudioRecorder, AudioRecordingError
 from core.greeting import build_greeting
 from core.version import APP_BUILD, APP_VERSION, BUILD_DATE
 from database.knowledge_store import KnowledgeStore
@@ -15,11 +18,12 @@ from services.connection_log_service import ConnectionLogService
 from services.conversation_service import ConversationService
 from services.knowledge_base import (
     SUPPORTED_TEXT_EXTENSIONS,
+    DocumentExtractionError,
     KnowledgeBase,
     UnsupportedFileTypeError,
     friendly_name,
 )
-from services.qa_log_service import QALogService
+from services.qa_log_service import OUT_OF_SCOPE_ENGINE, QALogService
 from services.update_manager import UpdateManager
 from ui import theme
 from ui.about_page import AboutPage
@@ -103,6 +107,7 @@ class MainWindow(ctk.CTk):
         knowledge_store = KnowledgeStore()
         self._knowledge_base = KnowledgeBase(knowledge_store)
         self._qa_log_service = QALogService(knowledge_store)
+        self._audio_recorder = AudioRecorder()
         self._connection_log_service = ConnectionLogService(knowledge_store)
 
         self._knowledge_base.sync_training_folder()
@@ -163,6 +168,7 @@ class MainWindow(ctk.CTk):
             on_stop_generation=self._handle_stop_generation,
             on_attach_file=self._handle_attach_file,
             on_regenerate_message=self._handle_regenerate_message,
+            on_dictate_toggle=self._handle_dictate_toggle,
         )
         self.history_panel = HistoryPanel(
             self.content_container,
@@ -363,11 +369,13 @@ class MainWindow(ctk.CTk):
         self.chat_panel.load_conversation(messages)
         self.sidebar.select("history")
 
+    SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
     def _handle_attach_file(self) -> None:
         file_path = filedialog.askopenfilename(
             title="Adjuntar archivo",
             filetypes=[
-                ("Archivos de texto", "*.txt *.md *.csv *.json *.log"),
+                ("Documentos e imágenes soportados", "*.txt *.md *.csv *.json *.log *.pdf *.docx *.png *.jpg *.jpeg *.webp *.gif"),
                 ("Todos los archivos", "*.*"),
             ],
         )
@@ -375,8 +383,11 @@ class MainWindow(ctk.CTk):
             return
 
         extension = Path(file_path).suffix.lower()
-        if extension not in SUPPORTED_TEXT_EXTENSIONS:
-            supported = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
+        is_image = extension in self.SUPPORTED_IMAGE_EXTENSIONS
+        is_document = extension in SUPPORTED_TEXT_EXTENSIONS
+
+        if not is_image and not is_document:
+            supported = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS | self.SUPPORTED_IMAGE_EXTENSIONS))
             messagebox.showwarning(
                 "Archivo no soportado",
                 f"Tipo de archivo '{extension or 'sin extensión'}' no soportado todavía.\n\n"
@@ -385,10 +396,79 @@ class MainWindow(ctk.CTk):
             )
             return
 
+        if is_image and self._active_provider is not None and not self._active_provider.supports_vision():
+            messagebox.showwarning(
+                "El motor actual no soporta imágenes",
+                f"{self._active_provider.name} no puede recibir imágenes todavía. "
+                "Cambiá de motor en Configuración o adjuntá un documento de texto.",
+                parent=self,
+            )
+            return
+
         self.chat_panel.input_bar.set_pending_attachment(file_path, Path(file_path).name)
 
     def _handle_db_connection_result(self, connected: bool, message: str) -> None:
         self.status_bar.set_db_status(connected, "SQL Server")
+
+    def _handle_dictate_toggle(self) -> None:
+        if self._audio_recorder.is_recording():
+            self._stop_dictation()
+        else:
+            self._start_dictation()
+
+    def _start_dictation(self) -> None:
+        if self._active_provider is None or not self._active_provider.supports_dictation():
+            engine_name = self._active_provider.name if self._active_provider else "el motor actual"
+            messagebox.showwarning(
+                "Chat de voz no disponible",
+                f"{engine_name} no soporta transcripción de voz todavía. Cambiá a OpenAI en "
+                "Configuración para usar el dictado por micrófono.",
+                parent=self,
+            )
+            return
+
+        try:
+            self._audio_recorder.start()
+        except AudioRecordingError as exc:
+            messagebox.showerror("No se pudo grabar", str(exc), parent=self)
+            return
+
+        self.chat_panel.input_bar.set_dictating(True)
+
+    def _stop_dictation(self) -> None:
+        self.chat_panel.input_bar.set_dictating(False)
+
+        try:
+            wav_path = self._audio_recorder.stop()
+        except AudioRecordingError as exc:
+            messagebox.showerror("No se pudo grabar", str(exc), parent=self)
+            return
+
+        provider = self._active_provider
+
+        def worker() -> None:
+            try:
+                text = provider.transcribe_audio(str(wav_path))
+            except Exception:  # noqa: BLE001 - un fallo de transcripción no debe romper la app
+                text = None
+            finally:
+                try:
+                    wav_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            self.after(0, lambda: self._apply_dictated_text(text))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_dictated_text(self, text: str | None) -> None:
+        if not text:
+            messagebox.showwarning(
+                "No se entendió nada",
+                "No se pudo transcribir el audio grabado. Probá de nuevo, más cerca del micrófono.",
+                parent=self,
+            )
+            return
+        self.chat_panel.input_bar.insert_dictated_text(text)
 
     def _handle_user_message(self, text: str, attachment_path: str | None = None) -> None:
         if self._active_conversation_id is None:
@@ -399,16 +479,53 @@ class MainWindow(ctk.CTk):
         self.chat_panel.add_message(message)
 
         attachment_context = ""
+        image_base64 = None
+        image_mime_type = None
+
         if attachment_path:
-            attachment_context = self._consume_pending_attachment(attachment_path)
+            extension = Path(attachment_path).suffix.lower()
+            if extension in self.SUPPORTED_IMAGE_EXTENSIONS:
+                image_base64, image_mime_type = self._consume_pending_image(attachment_path)
+            else:
+                attachment_context = self._consume_pending_attachment(attachment_path)
 
         self._stop_requested = False
-        self._dispatch_ai_response(text, extra_context=attachment_context)
+        self._dispatch_ai_response(
+            text, extra_context=attachment_context, image_base64=image_base64, image_mime_type=image_mime_type
+        )
+
+    def _consume_pending_image(self, attachment_path: str) -> tuple:
+        """
+        Codifica la imagen adjuntada en base64 para mandarla junto con
+        el mensaje al proveedor de IA (visión). Igual que con los
+        documentos, es efímera: no se guarda en ningún lado más allá de
+        esta pregunta puntual.
+        """
+        path = Path(attachment_path)
+        try:
+            image_bytes = path.read_bytes()
+        except OSError as exc:
+            note = self._conversation_service.add_assistant_message(
+                self._active_conversation_id, f"⚠️ No se pudo adjuntar la imagen: {exc}"
+            )
+            self.chat_panel.add_message(note)
+            return None, None
+
+        mime_type = mimetypes.guess_type(path.name)[0] or "image/png"
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+
+        note = self._conversation_service.add_assistant_message(
+            self._active_conversation_id,
+            f"🖼️ Imagen «{path.name}» adjuntada a este mensaje.",
+        )
+        self.chat_panel.add_message(note)
+
+        return encoded, mime_type
 
     def _consume_pending_attachment(self, attachment_path: str) -> str:
         try:
             filename, content = self._knowledge_base.read_ephemeral_attachment(attachment_path)
-        except (UnsupportedFileTypeError, FileNotFoundError, OSError) as exc:
+        except (UnsupportedFileTypeError, DocumentExtractionError, FileNotFoundError, OSError) as exc:
             note = self._conversation_service.add_assistant_message(
                 self._active_conversation_id, f"⚠️ No se pudo adjuntar el archivo: {exc}"
             )
@@ -431,8 +548,15 @@ class MainWindow(ctk.CTk):
         self._stop_requested = False
         self._dispatch_ai_response(question)
 
-    def _dispatch_ai_response(self, question: str, extra_context: str = "") -> None:
-        scored_matches = self._knowledge_base.search_with_scores(question)
+    def _dispatch_ai_response(
+        self,
+        question: str,
+        extra_context: str = "",
+        image_base64: str | None = None,
+        image_mime_type: str | None = None,
+    ) -> None:
+        embed_fn = self._active_provider.embed if self._active_provider is not None else None
+        scored_matches = self._knowledge_base.search_with_scores(question, embed_fn=embed_fn)
         if scored_matches and not extra_context:
             top_score = scored_matches[0][0]
             threshold = top_score * 0.85
@@ -445,7 +569,7 @@ class MainWindow(ctk.CTk):
             return
 
         matches = candidates
-        has_context = bool(matches) or bool(extra_context)
+        has_context = bool(matches) or bool(extra_context) or bool(image_base64)
 
         if not has_context:
             self._refuse_out_of_scope(question)
@@ -457,17 +581,28 @@ class MainWindow(ctk.CTk):
         source_filenames = ", ".join(m.filename for m in matches)
         kb_context = self._knowledge_base.build_context_snippet(matches)
         combined_context = "\n\n".join(part for part in (kb_context, extra_context) if part)
-        augmented_text = (
-            "Respondé ÚNICAMENTE usando la información de este contexto (documentos "
-            "de la Base de Conocimiento / carpeta Training). Si la respuesta a la "
-            "pregunta del usuario no está en este contexto, decí explícitamente que "
-            "no tenés esa información en la Base de Conocimiento — no completes con "
-            "tu conocimiento general, no inventes, y no busques en internet.\n\n"
-            f"{combined_context}\n\nPregunta del usuario: {question}"
-        )
+        if combined_context:
+            augmented_text = (
+                "Respondé ÚNICAMENTE usando la información de este contexto (documentos "
+                "de la Base de Conocimiento / carpeta Training). Si la respuesta a la "
+                "pregunta del usuario no está en este contexto, decí explícitamente que "
+                "no tenés esa información en la Base de Conocimiento — no completes con "
+                "tu conocimiento general, no inventes, y no busques en internet.\n\n"
+                f"{combined_context}\n\nPregunta del usuario: {question}"
+            )
+        else:
+            # Solo hay una imagen adjuntada, sin contexto de texto: la
+            # restricción de "solo responder con la Base de
+            # Conocimiento" no aplica acá — describir/analizar la
+            # imagen que el usuario mandó es justamente lo que se le
+            # está pidiendo.
+            augmented_text = question
 
         if self._active_provider is not None and self._active_provider.is_connected():
-            self._start_real_ai_response(question, augmented_text, source_filenames)
+            history = self._build_recent_history(self._active_conversation_id)
+            self._start_real_ai_response(
+                question, augmented_text, source_filenames, history, image_base64, image_mime_type
+            )
         else:
             self._generating_job = self.after(
                 900, lambda: self._finish_ai_response_placeholder(question, source_filenames)
@@ -486,7 +621,7 @@ class MainWindow(ctk.CTk):
             self._active_conversation_id, self._OUT_OF_SCOPE_MESSAGE
         )
         self.chat_panel.add_message(message)
-        self._qa_log_service.log(question, self._OUT_OF_SCOPE_MESSAGE, "Fuera de alcance", "")
+        self._qa_log_service.log(question, self._OUT_OF_SCOPE_MESSAGE, OUT_OF_SCOPE_ENGINE, "")
 
     def _ask_clarification(self, tied_documents) -> None:
         options = [friendly_name(doc.filename) for doc in tied_documents]
@@ -515,7 +650,37 @@ class MainWindow(ctk.CTk):
             "indicá amablemente que no lo tenés disponible en este momento."
         )
 
-    def _start_real_ai_response(self, original_text: str, augmented_text: str, source_filenames: str) -> None:
+    MAX_HISTORY_TURNS = 10
+
+    def _build_recent_history(self, conversation_id: int) -> list:
+        """
+        Arma los últimos turnos de la conversación activa para mandarlos
+        como memoria al proveedor de IA, excluyendo el mensaje que se
+        acaba de mandar (ese va aparte, como `message`/`augmented_text`).
+        Sin esto, cada pregunta se respondía en el vacío — el modelo no
+        tenía forma de saber de qué se venía hablando en la misma
+        conversación.
+        """
+        messages = self._conversation_service.get_conversation_messages(conversation_id)
+        if not messages:
+            return []
+
+        previous_messages = messages[:-1] if len(messages) >= 1 else messages
+        recent = previous_messages[-self.MAX_HISTORY_TURNS :]
+        return [
+            {"role": "user" if msg.is_user else "assistant", "content": msg.content}
+            for msg in recent
+        ]
+
+    def _start_real_ai_response(
+        self,
+        original_text: str,
+        augmented_text: str,
+        source_filenames: str,
+        history: list | None = None,
+        image_base64: str | None = None,
+        image_mime_type: str | None = None,
+    ) -> None:
         provider = self._active_provider
         conversation_id = self._active_conversation_id
         engine_name = provider.name
@@ -545,7 +710,13 @@ class MainWindow(ctk.CTk):
         def worker() -> None:
             try:
                 final_text = provider.send_message_stream(
-                    augmented_text, on_token, should_stop=lambda: self._stop_requested, system_prompt=system_prompt
+                    augmented_text,
+                    on_token,
+                    should_stop=lambda: self._stop_requested,
+                    system_prompt=system_prompt,
+                    history=history,
+                    image_base64=image_base64,
+                    image_mime_type=image_mime_type,
                 )
                 error_text = None
             except Exception as exc:

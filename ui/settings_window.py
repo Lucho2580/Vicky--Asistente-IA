@@ -1,14 +1,14 @@
 import os
 import subprocess
 import sys
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
 from config.app_config import AppConfig
 from core.paths import TRAINING_DIR
 from database.sqlserver import SQLServerCredentials, SQLServerDatabase
-from services.knowledge_base import UnsupportedFileTypeError
+from services.knowledge_base import DocumentExtractionError, UnsupportedFileTypeError
 from ui import theme
 
 
@@ -295,6 +295,25 @@ class SettingsPage(ctk.CTkScrollableFrame):
         self.qa_log_box.configure(state="disabled")
         self._refresh_qa_log()
 
+        unanswered_title = ctk.CTkLabel(
+            card,
+            text="Preguntas más frecuentes sin cobertura (para priorizar qué subir a Training)",
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL, weight="bold"),
+            text_color=theme.TEXT_DARK,
+        )
+        unanswered_title.pack(anchor="w", padx=20, pady=(4, 4))
+
+        self.unanswered_log_box = ctk.CTkTextbox(
+            card,
+            height=110,
+            corner_radius=theme.CORNER_RADIUS,
+            fg_color=theme.BACKGROUND_LIGHT,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=9),
+        )
+        self.unanswered_log_box.pack(fill="x", padx=20, pady=(0, 4))
+        self.unanswered_log_box.configure(state="disabled")
+        self._refresh_unanswered_log()
+
         card.add_footer_spacer()
 
     def _open_training_folder(self) -> None:
@@ -334,7 +353,7 @@ class SettingsPage(ctk.CTkScrollableFrame):
         file_path = filedialog.askopenfilename(
             title="Subir archivo de entrenamiento",
             filetypes=[
-                ("Archivos de texto", "*.txt *.md *.csv *.json *.log"),
+                ("Documentos soportados", "*.txt *.md *.csv *.json *.log *.pdf *.docx"),
                 ("Todos los archivos", "*.*"),
             ],
         )
@@ -342,10 +361,10 @@ class SettingsPage(ctk.CTkScrollableFrame):
             return
         try:
             self._knowledge_base.add_document(file_path)
-        except UnsupportedFileTypeError:
-            pass
-        except Exception:
-            pass
+        except (UnsupportedFileTypeError, DocumentExtractionError) as exc:
+            messagebox.showwarning("No se pudo subir el archivo", str(exc), parent=self)
+        except Exception as exc:  # noqa: BLE001 - cualquier otro error también se avisa, no se oculta
+            messagebox.showerror("No se pudo subir el archivo", str(exc), parent=self)
         self._refresh_files_list()
 
     def _refresh_files_list(self) -> None:
@@ -458,6 +477,27 @@ class SettingsPage(ctk.CTkScrollableFrame):
             self.qa_log_box.insert("1.0", "\n\n".join(lines))
 
         self.qa_log_box.configure(state="disabled")
+
+    def _refresh_unanswered_log(self) -> None:
+        self.unanswered_log_box.configure(state="normal")
+        self.unanswered_log_box.delete("1.0", "end")
+
+        if self._qa_log_service is None:
+            self.unanswered_log_box.configure(state="disabled")
+            return
+
+        top_questions = self._qa_log_service.top_unanswered_questions(limit=10)
+        if not top_questions:
+            self.unanswered_log_box.insert(
+                "1.0", "Todavía no hay preguntas sin cobertura registradas. 🎉"
+            )
+        else:
+            lines = [
+                f"{count}x  —  {question}" for question, count in top_questions
+            ]
+            self.unanswered_log_box.insert("1.0", "\n".join(lines))
+
+        self.unanswered_log_box.configure(state="disabled")
 
     def save(self) -> None:
         self._config.update(

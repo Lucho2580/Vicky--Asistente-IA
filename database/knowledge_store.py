@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_connection_log_created_at ON connection_log (crea
 PREVIEW_LENGTH = 200
 
 _TRAINING_FILES_COLUMNS = (
-    "id, filename, file_type, size_bytes, content_text, uploaded_at, source_path, source_mtime"
+    "id, filename, file_type, size_bytes, content_text, uploaded_at, source_path, source_mtime, embedding"
 )
 
 
@@ -68,6 +68,10 @@ class KnowledgeStore:
         if "source_mtime" not in existing_columns:
             self._connection.execute(
                 "ALTER TABLE training_files ADD COLUMN source_mtime REAL NOT NULL DEFAULT 0"
+            )
+        if "embedding" not in existing_columns:
+            self._connection.execute(
+                "ALTER TABLE training_files ADD COLUMN embedding TEXT NOT NULL DEFAULT ''"
             )
         self._connection.commit()
 
@@ -168,6 +172,24 @@ class KnowledgeStore:
         ).fetchone()
         return row["content_text"] if row else None
 
+    def update_training_file_embedding(self, file_id: int, embedding_json: str) -> None:
+        self._connection.execute(
+            "UPDATE training_files SET embedding = ? WHERE id = ?", (embedding_json, file_id)
+        )
+        self._connection.commit()
+
+    def list_training_files_with_embeddings(self) -> List[tuple]:
+        """
+        Devuelve (TrainingFile, embedding_json_o_cadena_vacía) para
+        todos los documentos — usado por la búsqueda semántica para
+        calcular similitud contra la pregunta del usuario sin tener
+        que volver a pedir cada campo por separado.
+        """
+        rows = self._connection.execute(
+            f"SELECT {_TRAINING_FILES_COLUMNS} FROM training_files"
+        ).fetchall()
+        return [(self._row_to_training_file(row), row["embedding"] or "") for row in rows]
+
     def update_training_file(self, file_id: int, filename: Optional[str] = None) -> None:
         if filename is not None:
             self._connection.execute(
@@ -259,6 +281,13 @@ class KnowledgeStore:
             )
             for row in rows
         ]
+
+    def list_qa_by_engine(self, engine: str, limit: int = 500) -> List[QARecord]:
+        rows = self._connection.execute(
+            "SELECT * FROM qa_log WHERE engine = ? ORDER BY created_at DESC LIMIT ?",
+            (engine, limit),
+        ).fetchall()
+        return [QARecord(**dict(row)) for row in rows]
 
     def close(self) -> None:
         self._connection.close()

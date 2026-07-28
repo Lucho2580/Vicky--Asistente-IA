@@ -68,6 +68,15 @@ class AIProvider(ABC):
     def _enforce_rate_limit(self) -> None:
         self._rate_limiter.check_and_record()
 
+    def embed(self, text: str) -> Optional[list]:
+        """
+        Calcula el vector de embedding de un texto, si este proveedor lo
+        soporta. Devuelve None si no está soportado (la búsqueda semántica
+        de la Base de Conocimiento cae de nuevo a la búsqueda por
+        keywords en ese caso — nunca se rompe por esto).
+        """
+        return None
+
     @abstractmethod
     def connect(self, endpoint: str = "", api_key: str = "") -> Tuple[bool, str]:
         raise NotImplementedError
@@ -78,7 +87,14 @@ class AIProvider(ABC):
     def is_connected(self) -> bool:
         return self._connected
 
-    def send_message(self, message: str, system_prompt: Optional[str] = None) -> str:
+    def send_message(
+        self,
+        message: str,
+        system_prompt: Optional[str] = None,
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
+    ) -> str:
         raise NotImplementedError(f"El envío de mensajes con {self.name} todavía no está implementado.")
 
     def send_message_stream(
@@ -87,11 +103,24 @@ class AIProvider(ABC):
         on_token: Callable[[str], None],
         should_stop: Optional[Callable[[], bool]] = None,
         system_prompt: Optional[str] = None,
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
     ) -> str:
-        full_text = self.send_message(message, system_prompt=system_prompt)
+        full_text = self.send_message(
+            message,
+            system_prompt=system_prompt,
+            history=history,
+            image_base64=image_base64,
+            image_mime_type=image_mime_type,
+        )
         if not (should_stop and should_stop()):
             on_token(full_text)
         return full_text
+
+    def supports_vision(self) -> bool:
+        """True si este proveedor puede recibir imágenes adjuntas junto al mensaje."""
+        return False
 
     @classmethod
     def _http_request(
@@ -100,11 +129,14 @@ class AIProvider(ABC):
         headers: dict,
         method: str = "GET",
         json_body: Any = None,
+        raw_body: Optional[bytes] = None,
         timeout: int = DEFAULT_TIMEOUT_SECONDS,
     ) -> Tuple[int | None, str | None, str | None]:
         data = None
         request_headers = dict(headers)
-        if json_body is not None:
+        if raw_body is not None:
+            data = raw_body
+        elif json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
             request_headers.setdefault("Content-Type", "application/json")
 
@@ -137,6 +169,24 @@ class AIProvider(ABC):
         cls, url: str, headers: dict, json_body: Any, timeout: int = DEFAULT_TIMEOUT_SECONDS
     ) -> Tuple[int | None, str | None, str | None]:
         return cls._http_request(url, headers, method="POST", json_body=json_body, timeout=timeout)
+
+    @classmethod
+    def _http_post_raw(
+        cls, url: str, headers: dict, raw_body: bytes, timeout: int = DEFAULT_TIMEOUT_SECONDS
+    ) -> Tuple[int | None, str | None, str | None]:
+        """Para subir contenido que no es JSON (ej. multipart/form-data con un archivo adjunto)."""
+        return cls._http_request(url, headers, method="POST", raw_body=raw_body, timeout=timeout)
+
+    def transcribe_audio(self, file_path: str) -> Optional[str]:
+        """
+        Transcribe un archivo de audio a texto, si este proveedor lo
+        soporta. Devuelve None si no está soportado.
+        """
+        return None
+
+    def supports_dictation(self) -> bool:
+        """True si este proveedor puede transcribir audio a texto (chat de voz)."""
+        return False
 
     @staticmethod
     def _parse_openai_style_sse_line(line: str) -> Optional[str]:

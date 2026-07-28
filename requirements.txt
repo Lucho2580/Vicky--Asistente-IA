@@ -19,6 +19,16 @@ msal>=1.30
 # a exigir checksum SHA-256 como mínimo (nunca instala sin verificar).
 cryptography>=42.0
 
+# Chat de voz: grabación de micrófono (sounddevice) y transcripción
+# vía Whisper (OpenAI). Sin esto, el botón 🎤 avisa que no puede grabar
+# en vez de romper la app.
+sounddevice>=0.4
+numpy>=1.26
+
+# Base de Conocimiento: extracción de texto de PDF y Word
+pypdf>=4.0
+python-docx>=1.1
+
 # Almacenamiento seguro de credenciales (API keys, contraseña de BD)
 # en el llavero nativo del SO: Windows Credential Manager / macOS
 # Keychain / Secret Service (Linux), en vez de texto plano en disco.

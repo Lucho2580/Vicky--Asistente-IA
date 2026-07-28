@@ -258,12 +258,14 @@ class ChatInputBar(ctk.CTkFrame):
     _MIN_HEIGHT = 44
     _MAX_HEIGHT = 160
 
-    def __init__(self, master, on_send=None, on_stop=None, on_attach=None, **kwargs):
+    def __init__(self, master, on_send=None, on_stop=None, on_attach=None, on_dictate_toggle=None, **kwargs):
         super().__init__(master, fg_color=theme.SURFACE_WHITE, corner_radius=0, **kwargs)
         self._on_send = on_send
         self._on_stop = on_stop
         self._on_attach = on_attach
+        self._on_dictate_toggle = on_dictate_toggle
         self._is_generating = False
+        self._is_dictating = False
         self._pending_attachment_path: str | None = None
         self._current_height = self._MIN_HEIGHT
         self._build_ui()
@@ -332,9 +334,9 @@ class ChatInputBar(ctk.CTkFrame):
             corner_radius=theme.CORNER_RADIUS,
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=17),
             fg_color="transparent",
-            hover_color=theme.SURFACE_WHITE,
-            text_color=theme.SIDEBAR_TEXT_DISABLED,
-            state="disabled",
+            hover_color=theme.PRIMARY_RED_LIGHT,
+            text_color=theme.TEXT_MUTED,
+            command=self._toggle_dictation,
         )
         self.dictate_button.grid(row=1, column=2, padx=4, pady=10)
 
@@ -412,6 +414,31 @@ class ChatInputBar(ctk.CTkFrame):
         if self._on_attach:
             self._on_attach()
 
+    def _toggle_dictation(self) -> None:
+        if self._on_dictate_toggle:
+            self._on_dictate_toggle()
+
+    def set_dictating(self, dictating: bool) -> None:
+        """
+        Llamado por MainWindow para reflejar visualmente si hay una
+        grabación en curso — el micrófono real lo maneja
+        core/audio_recorder.py, este método solo actualiza el botón.
+        """
+        self._is_dictating = dictating
+        if dictating:
+            self.dictate_button.configure(text="⏹", fg_color=theme.STATUS_RED, text_color="#FFFFFF")
+        else:
+            self.dictate_button.configure(text="🎤", fg_color="transparent", text_color=theme.TEXT_MUTED)
+
+    def insert_dictated_text(self, text: str) -> None:
+        """Inserta el texto transcripto en el cuadro, para que el usuario lo revise antes de enviar."""
+        if getattr(self, "_showing_placeholder", False):
+            self._clear_placeholder()
+        current = self.text_entry.get("1.0", "end").strip()
+        separator = " " if current else ""
+        self.text_entry.insert("end", f"{separator}{text}")
+        self._autosize_input()
+
     def set_pending_attachment(self, file_path: str, display_name: str) -> None:
         self._pending_attachment_path = file_path
         self.attachment_label.configure(text=f"📎 {display_name}")
@@ -444,6 +471,7 @@ class ChatPanel(ctk.CTkFrame):
         on_stop_generation=None,
         on_attach_file=None,
         on_regenerate_message=None,
+        on_dictate_toggle=None,
         **kwargs,
     ):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, **kwargs)
@@ -451,6 +479,7 @@ class ChatPanel(ctk.CTkFrame):
         self._on_stop_generation = on_stop_generation
         self._on_attach_file = on_attach_file
         self._on_regenerate_message = on_regenerate_message
+        self._on_dictate_toggle = on_dictate_toggle
         self._typing_indicator: TypingIndicator | None = None
         self._has_conversation = False
         self._last_user_text: str | None = None
@@ -472,6 +501,7 @@ class ChatPanel(ctk.CTkFrame):
             on_send=self._handle_user_message,
             on_stop=self._handle_stop_requested,
             on_attach=self._on_attach_file,
+            on_dictate_toggle=self._on_dictate_toggle,
         )
         self.input_bar.grid(row=1, column=0, sticky="ew")
 

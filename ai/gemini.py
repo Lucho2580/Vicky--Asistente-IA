@@ -11,6 +11,9 @@ class GeminiProvider(AIProvider):
 
     name = "Gemini"
 
+    def supports_vision(self) -> bool:
+        return True
+
     def connect(self, endpoint: str = "", api_key: str = "") -> Tuple[bool, str]:
         if not api_key.strip():
             self._connected = False
@@ -29,14 +32,21 @@ class GeminiProvider(AIProvider):
         self._connected = False
         return False, self._describe_error(status, error)
 
-    def send_message(self, message: str, system_prompt: Optional[str] = None) -> str:
+    def send_message(
+        self,
+        message: str,
+        system_prompt: Optional[str] = None,
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
+    ) -> str:
         if not self.is_connected():
             raise RuntimeError("Gemini no está conectado. Prueba la conexión en Configuración.")
         self._enforce_rate_limit()
 
         base_url = self._endpoint or MODELS_ENDPOINT
         url = f"{base_url}/{DEFAULT_MODEL}:generateContent"
-        payload = self._build_payload(message, system_prompt)
+        payload = self._build_payload(message, system_prompt, history, image_base64, image_mime_type)
 
         status, body, error = self._http_post(
             url, headers=self._auth_headers(), json_body=payload, timeout=CHAT_TIMEOUT_SECONDS
@@ -58,6 +68,9 @@ class GeminiProvider(AIProvider):
         on_token: Callable[[str], None],
         should_stop: Optional[Callable[[], bool]] = None,
         system_prompt: Optional[str] = None,
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
     ) -> str:
         if not self.is_connected():
             raise RuntimeError("Gemini no está conectado. Prueba la conexión en Configuración.")
@@ -65,7 +78,7 @@ class GeminiProvider(AIProvider):
 
         base_url = self._endpoint or MODELS_ENDPOINT
         url = f"{base_url}/{DEFAULT_MODEL}:streamGenerateContent?alt=sse"
-        payload = self._build_payload(message, system_prompt)
+        payload = self._build_payload(message, system_prompt, history, image_base64, image_mime_type)
 
         collected: list[str] = []
 
@@ -103,8 +116,26 @@ class GeminiProvider(AIProvider):
         return {"x-goog-api-key": self._api_key}
 
     @staticmethod
-    def _build_payload(message: str, system_prompt: Optional[str]) -> dict:
-        payload = {"contents": [{"parts": [{"text": message}]}]}
+    def _build_payload(
+        message: str,
+        system_prompt: Optional[str],
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
+    ) -> dict:
+        contents = []
+        for turn in history or []:
+            gemini_role = "model" if turn["role"] == "assistant" else "user"
+            contents.append({"role": gemini_role, "parts": [{"text": turn["content"]}]})
+
+        parts = [{"text": message}]
+        if image_base64:
+            parts.append(
+                {"inline_data": {"mime_type": image_mime_type or "image/png", "data": image_base64}}
+            )
+        contents.append({"role": "user", "parts": parts})
+
+        payload = {"contents": contents}
         if system_prompt:
             payload["system_instruction"] = {"parts": [{"text": system_prompt}]}
         return payload

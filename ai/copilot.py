@@ -11,6 +11,9 @@ class GitHubCopilotProvider(AIProvider):
 
     name = "GitHub Copilot"
 
+    def supports_vision(self) -> bool:
+        return True
+
     def connect(self, endpoint: str = "", api_key: str = "") -> Tuple[bool, str]:
         if not api_key.strip():
             self._connected = False
@@ -36,7 +39,14 @@ class GitHubCopilotProvider(AIProvider):
         self._connected = False
         return False, self._describe_error(status, error)
 
-    def send_message(self, message: str, system_prompt: Optional[str] = None) -> str:
+    def send_message(
+        self,
+        message: str,
+        system_prompt: Optional[str] = None,
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
+    ) -> str:
         if not self.is_connected():
             raise RuntimeError("GitHub Copilot no está conectado. Prueba la conexión en Configuración.")
         self._enforce_rate_limit()
@@ -45,7 +55,7 @@ class GitHubCopilotProvider(AIProvider):
         headers = self._build_headers()
         payload = {
             "model": DEFAULT_MODEL,
-            "messages": self._build_messages(message, system_prompt),
+            "messages": self._build_messages(message, system_prompt, history, image_base64, image_mime_type),
             "max_tokens": 800,
         }
 
@@ -67,6 +77,9 @@ class GitHubCopilotProvider(AIProvider):
         on_token: Callable[[str], None],
         should_stop: Optional[Callable[[], bool]] = None,
         system_prompt: Optional[str] = None,
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
     ) -> str:
         if not self.is_connected():
             raise RuntimeError("GitHub Copilot no está conectado. Prueba la conexión en Configuración.")
@@ -76,7 +89,7 @@ class GitHubCopilotProvider(AIProvider):
         headers = self._build_headers()
         payload = {
             "model": DEFAULT_MODEL,
-            "messages": self._build_messages(message, system_prompt),
+            "messages": self._build_messages(message, system_prompt, history, image_base64, image_mime_type),
             "max_tokens": 800,
             "stream": True,
         }
@@ -100,11 +113,30 @@ class GitHubCopilotProvider(AIProvider):
         return "".join(collected)
 
     @staticmethod
-    def _build_messages(message: str, system_prompt: Optional[str]) -> list[dict]:
+    def _build_messages(
+        message: str,
+        system_prompt: Optional[str],
+        history: Optional[list] = None,
+        image_base64: Optional[str] = None,
+        image_mime_type: Optional[str] = None,
+    ) -> list[dict]:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": message})
+        for turn in history or []:
+            messages.append({"role": turn["role"], "content": turn["content"]})
+
+        if image_base64:
+            mime = image_mime_type or "image/png"
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": message},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_base64}"}},
+                ],
+            })
+        else:
+            messages.append({"role": "user", "content": message})
         return messages
 
     def _build_headers(self) -> dict:
