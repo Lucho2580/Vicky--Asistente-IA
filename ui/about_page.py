@@ -1,7 +1,6 @@
 import customtkinter as ctk
 
 from config.app_config import AppConfig
-from core.paths import CONVERSATIONS_DB_PATH, KNOWLEDGE_DB_PATH, LOGS_DIR, TRAINING_DIR
 from core.version import APP_BUILD, APP_VERSION, BUILD_DATE
 from ui import theme
 from ui.settings_window import Card
@@ -25,7 +24,7 @@ class AboutPage(ctk.CTkScrollableFrame):
 
         title_label = ctk.CTkLabel(
             header,
-            text="Vicky Consulting",
+            text="Vicky",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=20, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
@@ -77,20 +76,8 @@ class AboutPage(ctk.CTkScrollableFrame):
         session_card = Card(self, "Sesión actual")
         session_card.pack(fill="x", padx=24, pady=12)
         self._add_row(session_card, "Usuario", self._display_name or "Sin identificar (login con Microsoft no usado)")
-        self._add_row(session_card, "Motor de IA", "GitHub Copilot")
+        self._add_row(session_card, "Motor de IA", self._config.settings.ai_engine or "Sin configurar")
         session_card.add_footer_spacer()
-
-        paths_card = Card(
-            self,
-            "Ubicación de los datos",
-            "Toda la información se guarda localmente en esta computadora, no en la nube.",
-        )
-        paths_card.pack(fill="x", padx=24, pady=12)
-        self._add_row(paths_card, "Conversaciones", str(CONVERSATIONS_DB_PATH))
-        self._add_row(paths_card, "Base de conocimiento", str(KNOWLEDGE_DB_PATH))
-        self._add_row(paths_card, "Carpeta Training", str(TRAINING_DIR))
-        self._add_row(paths_card, "Logs", str(LOGS_DIR))
-        paths_card.add_footer_spacer()
 
         footer_label = ctk.CTkLabel(
             self,

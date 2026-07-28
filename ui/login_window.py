@@ -47,7 +47,7 @@ class LoginOverlay(ctk.CTkFrame):
 
         brand_label = ctk.CTkLabel(
             logo_container,
-            text="Vicky\nConsulting",
+            text="Vicky",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=22, weight="bold"),
             text_color="#FFFFFF",
             justify="center",

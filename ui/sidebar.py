@@ -69,7 +69,7 @@ class Sidebar(ctk.CTkFrame):
 
         ctk.CTkLabel(
             header,
-            text="Vicky Consulting",
+            text="Vicky",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_TITLE, weight="bold"),
             text_color="#FFFFFF",
         ).pack(side="left")

@@ -61,7 +61,7 @@ class ContentHeader(ctk.CTkFrame):
 
         title_label = ctk.CTkLabel(
             self,
-            text="Vicky Consulting",
+            text="Vicky",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_NORMAL, weight="bold"),
             text_color=theme.TEXT_DARK,
         )
@@ -95,7 +95,7 @@ class MainWindow(ctk.CTk):
     def __init__(self, display_name: str | None = None) -> None:
         super().__init__()
         self._display_name = display_name
-        self.title("Vicky Consulting")
+        self.title("Vicky")
         self.geometry("1100x720")
         self.minsize(900, 600)
 

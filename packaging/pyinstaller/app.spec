@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Spec de PyInstaller para "Vicky Consulting".
+Spec de PyInstaller para "Vicky".
 
 Genera un ejecutable de Windows independiente (no requiere que el
 usuario final tenga Python instalado). Este archivo debe ejecutarse
