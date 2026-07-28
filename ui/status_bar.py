@@ -62,9 +62,6 @@ class StatusBar(ctk.CTkFrame):
         self.ai_status = StatusChip(self, "IA:")
         self.ai_status.grid(row=0, column=0, padx=(20, 20), pady=8, sticky="w")
 
-        self.db_status = StatusChip(self, "Base de datos:")
-        self.db_status.grid(row=0, column=1, padx=(0, 20), pady=8, sticky="w")
-
         self.user_status = ctk.CTkLabel(
             self, text="Usuario: Invitado",
             font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
@@ -75,10 +72,6 @@ class StatusBar(ctk.CTkFrame):
     def set_ai_status(self, connected: bool, engine_name: str = "") -> None:
         text = f"Conectada · {engine_name}" if connected and engine_name else ("Conectada" if connected else "Desconectado")
         self.ai_status.set_state(connected, text)
-
-    def set_db_status(self, connected: bool, engine_name: str = "SQL Server") -> None:
-        text = engine_name if connected else "Desconectado"
-        self.db_status.set_state(connected, text)
 
     def set_user(self, username: str) -> None:
         self.user_status.configure(text=f"Usuario: {username or 'Invitado'}")

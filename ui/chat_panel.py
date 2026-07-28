@@ -621,10 +621,11 @@ class ChatPanel(ctk.CTkFrame):
 
 class HistoryPanel(ctk.CTkScrollableFrame):
 
-    def __init__(self, master, on_select_conversation=None, on_delete_conversation=None, **kwargs):
+    def __init__(self, master, on_select_conversation=None, on_delete_conversation=None, on_export_conversation=None, **kwargs):
         super().__init__(master, fg_color=theme.BACKGROUND_LIGHT, corner_radius=0, **kwargs)
         self._on_select_conversation = on_select_conversation
         self._on_delete_conversation = on_delete_conversation
+        self._on_export_conversation = on_export_conversation
 
     def refresh(self, grouped_conversations) -> None:
         for widget in self.winfo_children():
@@ -687,6 +688,19 @@ class HistoryPanel(ctk.CTkScrollableFrame):
         )
         delete_button.pack(side="right", padx=(4, 4))
 
+        export_button = ctk.CTkButton(
+            row,
+            text="📤",
+            width=28,
+            height=24,
+            fg_color="transparent",
+            hover_color=theme.PRIMARY_RED_LIGHT,
+            text_color=theme.TEXT_MUTED,
+            font=ctk.CTkFont(family=theme.FONT_FAMILY, size=theme.FONT_SIZE_SMALL),
+            command=lambda cid=conversation.id, title=conversation.title: self._handle_export(cid, title),
+        )
+        export_button.pack(side="right", padx=(4, 0))
+
         meta_label = ctk.CTkLabel(
             row,
             text=f"{time_text}  ·  {conversation.message_count} msj",
@@ -698,6 +712,10 @@ class HistoryPanel(ctk.CTkScrollableFrame):
     def _handle_select(self, conversation_id: int) -> None:
         if self._on_select_conversation:
             self._on_select_conversation(conversation_id)
+
+    def _handle_export(self, conversation_id: int, title: str) -> None:
+        if self._on_export_conversation:
+            self._on_export_conversation(conversation_id, title)
 
     def _handle_delete(self, conversation_id: int, title: str) -> None:
         confirmed = messagebox.askyesno(

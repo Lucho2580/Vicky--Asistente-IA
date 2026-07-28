@@ -16,6 +16,7 @@ from database.knowledge_store import KnowledgeStore
 from models.message import Message, Sender
 from services.connection_log_service import ConnectionLogService
 from services.conversation_service import ConversationService
+from services.export_service import ExportError, export_conversation_to_docx, export_conversation_to_pdf
 from services.knowledge_base import (
     SUPPORTED_TEXT_EXTENSIONS,
     DocumentExtractionError,
@@ -124,6 +125,8 @@ class MainWindow(ctk.CTk):
         self._active_conversation_id: int | None = None
         self._current_view = "home"
         self._active_provider = None
+        self._offline_queue: list[tuple[int, str]] = []
+        self._offline_retry_job = None
         self._generating_job = None
         self._stop_requested = False
         self._current_stream_state: dict | None = None
@@ -174,14 +177,9 @@ class MainWindow(ctk.CTk):
             self.content_container,
             on_select_conversation=self._handle_open_conversation,
             on_delete_conversation=self._handle_delete_conversation,
+            on_export_conversation=self._handle_export_conversation,
         )
-        self.settings_page = SettingsPage(
-            self.content_container,
-            on_db_connection_change=self._handle_db_connection_result,
-            knowledge_base=self._knowledge_base,
-            qa_log_service=self._qa_log_service,
-            connection_log_service=self._connection_log_service,
-        )
+        self.settings_page = SettingsPage(self.content_container)
         self.help_page = HelpPage(self.content_container)
         self.about_page = AboutPage(
             self.content_container,
@@ -199,13 +197,14 @@ class MainWindow(ctk.CTk):
         self.chat_panel.show_home(build_greeting(self._display_name))
         self.content_header.set_connection_state("disconnected")
         self.status_bar.set_ai_status(False)
-        self.status_bar.set_db_status(False)
         self.status_bar.set_user("Administrador")
 
         if self._config.ai_credentials_locked:
             self._start_auto_connect_with_retry()
 
     def _maybe_check_for_updates_on_startup(self) -> None:
+        if not self._config.settings.check_updates_on_startup:
+            return
         self.after(1500, self._run_update_check)
 
     def _run_update_check(self, manual: bool = False) -> None:
@@ -247,6 +246,10 @@ class MainWindow(ctk.CTk):
                 )
             return
 
+        if not manual and self._config.settings.silent_updates_enabled:
+            self._start_silent_update(update_info)
+            return
+
         self._update_dialog = UpdateDialog(
             self,
             update_manager=self._update_manager,
@@ -255,6 +258,27 @@ class MainWindow(ctk.CTk):
             on_remind_later=self._handle_update_remind_later,
             on_ready_to_install=self._handle_update_ready_to_install,
         )
+
+    def _start_silent_update(self, update_info) -> None:
+        get_logger().info("Actualización silenciosa: descargando %s", update_info.version)
+
+        def on_progress(_downloaded, _total, _percent, _speed) -> None:
+            pass
+
+        def on_complete(success: bool, installer_path, error) -> None:
+            self.after(0, lambda: self._finish_silent_update(success, installer_path, error))
+
+        self._update_manager.download_update(update_info, on_progress, on_complete)
+
+    def _finish_silent_update(self, success: bool, installer_path, error) -> None:
+        if not success or not installer_path:
+            get_logger().warning("Actualización silenciosa: no se pudo descargar/verificar: %s", error)
+            return
+
+        get_logger().info("Actualización silenciosa: instalando %s", installer_path)
+        installed, install_error = self._update_manager.install_update(installer_path, silent=True)
+        if not installed:
+            get_logger().warning("Actualización silenciosa: falló la instalación: %s", install_error)
 
     def check_for_updates_now(self) -> None:
         self._run_update_check(manual=True)
@@ -317,6 +341,157 @@ class MainWindow(ctk.CTk):
             next_delay * 1000,
             lambda: self._auto_connect_attempt(engine_name, provider_cls, next_delay + self.AUTO_CONNECT_DELAY_INCREMENT_SECONDS),
         )
+
+    OFFLINE_QUEUE_RETRY_SECONDS = 15
+    OFFLINE_QUEUE_RETRY_MAX_SECONDS = 90
+
+    def _queue_message_offline(self, conversation_id: int, question: str, source_filenames: str = "") -> None:
+        """
+        Se llama cuando el usuario manda una pregunta sin tener un
+        proveedor de IA conectado. En vez de devolver una respuesta
+        genérica de "no estoy conectado" (que obligaba a repetir la
+        pregunta después a mano), la pregunta queda en cola y un ciclo
+        de reintentos en segundo plano la responde sola en cuanto la
+        conexión vuelve — sin que el usuario tenga que hacer nada.
+        """
+        self._offline_queue.append((conversation_id, question))
+        self._qa_log_service.log(question, "(en cola, sin conexión)", "Offline", source_filenames)
+
+        note = self._conversation_service.add_assistant_message(
+            conversation_id,
+            "🔌 No hay conexión con la IA en este momento. Tu pregunta quedó en cola — la voy a "
+            "responder sola en cuanto se restablezca la conexión, no hace falta que la reenvíes.",
+        )
+        self._deliver_queued_message(conversation_id, note)
+
+        self._ensure_offline_retry_running()
+
+    def _ensure_offline_retry_running(self) -> None:
+        if self._offline_retry_job is not None:
+            return
+        self._offline_retry_job = self.after(
+            self.OFFLINE_QUEUE_RETRY_SECONDS * 1000,
+            lambda: self._attempt_offline_reconnect(self.OFFLINE_QUEUE_RETRY_SECONDS),
+        )
+
+    def _attempt_offline_reconnect(self, current_delay: int) -> None:
+        self._offline_retry_job = None
+        if not self._offline_queue:
+            return
+
+        provider_cls = AI_PROVIDERS[AI_ENGINE_NAME]
+        settings = self._config.settings
+
+        def worker() -> None:
+            provider = provider_cls()
+            connected, message = provider.connect(endpoint=settings.ai_endpoint, api_key=settings.ai_api_key)
+            self.after(0, lambda: self._handle_offline_reconnect_result(provider, connected, message, current_delay))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _handle_offline_reconnect_result(self, provider, connected: bool, message: str, current_delay: int) -> None:
+        if not self.winfo_exists():
+            return
+
+        if not connected:
+            next_delay = min(current_delay + self.AUTO_CONNECT_DELAY_INCREMENT_SECONDS, self.OFFLINE_QUEUE_RETRY_MAX_SECONDS)
+            self._offline_retry_job = self.after(
+                next_delay * 1000, lambda: self._attempt_offline_reconnect(next_delay)
+            )
+            return
+
+        self._active_provider = provider
+        self.content_header.set_connection_state("connected")
+        self.status_bar.set_ai_status(True, provider.name)
+        get_logger().info("Conexión restablecida: se procesa la cola de %d mensaje(s) pendiente(s).", len(self._offline_queue))
+        self._flush_offline_queue()
+
+    def _flush_offline_queue(self) -> None:
+        if not self._offline_queue:
+            return
+        conversation_id, question = self._offline_queue.pop(0)
+        self._answer_queued_message(conversation_id, question)
+
+    def _answer_queued_message(self, conversation_id: int, question: str) -> None:
+        provider = self._active_provider
+        if provider is None or not provider.is_connected():
+            self._offline_queue.insert(0, (conversation_id, question))
+            self._ensure_offline_retry_running()
+            return
+
+        embed_fn = provider.embed
+        scored_matches = self._knowledge_base.search_with_scores(question, embed_fn=embed_fn)
+        candidates = []
+        if scored_matches:
+            threshold = scored_matches[0][0] * 0.85
+            candidates = [doc for score, doc in scored_matches if score >= threshold]
+
+        if not candidates:
+            reply_text = self._OUT_OF_SCOPE_MESSAGE
+            self._qa_log_service.log(question, reply_text, OUT_OF_SCOPE_ENGINE, "")
+            message = self._conversation_service.add_assistant_message(conversation_id, reply_text)
+            self._deliver_queued_message(conversation_id, message)
+            self._continue_offline_queue()
+            return
+
+        source_filenames = ", ".join(m.filename for m in candidates)
+        kb_context = self._knowledge_base.build_context_snippet(candidates)
+        augmented_text = (
+            "Respondé ÚNICAMENTE usando la información de este contexto (documentos "
+            "de la Base de Conocimiento / carpeta Training). Si la respuesta a la "
+            "pregunta del usuario no está en este contexto, decí explícitamente que "
+            "no tenés esa información en la Base de Conocimiento.\n\n"
+            f"{kb_context}\n\nPregunta del usuario: {question}"
+        )
+        system_prompt = self._build_system_prompt()
+        history = self._build_recent_history(conversation_id)
+        engine_name = provider.name
+
+        def worker() -> None:
+            try:
+                reply_text = provider.send_message(augmented_text, system_prompt=system_prompt, history=history)
+                error = None
+            except Exception as exc:  # noqa: BLE001
+                reply_text = None
+                error = str(exc)
+            self.after(
+                0,
+                lambda: self._finish_queued_message(conversation_id, question, source_filenames, reply_text, error, engine_name),
+            )
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_queued_message(
+        self, conversation_id: int, question: str, source_filenames: str, reply_text, error, engine_name: str
+    ) -> None:
+        if error:
+            get_logger().warning("La cola offline volvió a perder conexión: %s", error)
+            self._offline_queue.insert(0, (conversation_id, question))
+            self.content_header.set_connection_state("disconnected")
+            self.status_bar.set_ai_status(False, engine_name)
+            self._ensure_offline_retry_running()
+            return
+
+        self._qa_log_service.log(question, reply_text or "", engine_name, source_filenames)
+        message = self._conversation_service.add_assistant_message(conversation_id, reply_text or "")
+        self._deliver_queued_message(conversation_id, message)
+        self._continue_offline_queue()
+
+    def _deliver_queued_message(self, conversation_id: int, message) -> None:
+        """
+        Persiste siempre (aunque el usuario esté mirando otra
+        conversación en este momento) y solo toca la pantalla si esa
+        conversación es justo la que está visible ahora — si no, el
+        mensaje va a aparecer solo cuando el usuario la vuelva a abrir
+        desde el Historial.
+        """
+        if conversation_id == self._active_conversation_id:
+            self.chat_panel.add_message(message)
+
+    def _continue_offline_queue(self) -> None:
+        if self._offline_queue:
+            conversation_id, question = self._offline_queue.pop(0)
+            self._answer_queued_message(conversation_id, question)
     def _hide_all_pages(self) -> None:
         self.chat_panel.grid_forget()
         self.history_panel.grid_forget()
@@ -349,6 +524,36 @@ class MainWindow(ctk.CTk):
 
         elif key == "about":
             self.about_page.grid(row=1, column=0, sticky="nsew")
+
+    def _handle_export_conversation(self, conversation_id: int, title: str) -> None:
+        import re
+
+        safe_name = re.sub(r'[\\/*?:"<>|]', "_", title or "conversacion").strip() or "conversacion"
+        file_path = filedialog.asksaveasfilename(
+            title="Exportar conversación",
+            initialfile=safe_name,
+            defaultextension=".docx",
+            filetypes=[("Documento Word", "*.docx"), ("PDF", "*.pdf")],
+        )
+        if not file_path:
+            return
+
+        messages = self._conversation_service.get_conversation_messages(conversation_id)
+        output_path = Path(file_path)
+
+        try:
+            if output_path.suffix.lower() == ".pdf":
+                export_conversation_to_pdf(title, messages, output_path)
+            else:
+                export_conversation_to_docx(title, messages, output_path)
+        except ExportError as exc:
+            messagebox.showerror("No se pudo exportar", str(exc), parent=self)
+            return
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("No se pudo exportar", str(exc), parent=self)
+            return
+
+        messagebox.showinfo("Conversación exportada", f"Se guardó en:\n{output_path}", parent=self)
 
     def _handle_delete_conversation(self, conversation_id: int) -> None:
         self._conversation_service.delete_conversation(conversation_id)
@@ -406,9 +611,6 @@ class MainWindow(ctk.CTk):
             return
 
         self.chat_panel.input_bar.set_pending_attachment(file_path, Path(file_path).name)
-
-    def _handle_db_connection_result(self, connected: bool, message: str) -> None:
-        self.status_bar.set_db_status(connected, "SQL Server")
 
     def _handle_dictate_toggle(self) -> None:
         if self._audio_recorder.is_recording():
@@ -604,9 +806,9 @@ class MainWindow(ctk.CTk):
                 question, augmented_text, source_filenames, history, image_base64, image_mime_type
             )
         else:
-            self._generating_job = self.after(
-                900, lambda: self._finish_ai_response_placeholder(question, source_filenames)
-            )
+            self.chat_panel.hide_typing_indicator()
+            self.chat_panel.set_generating(False)
+            self._queue_message_offline(self._active_conversation_id, question, source_filenames)
 
     _OUT_OF_SCOPE_MESSAGE = (
         "🔒 No tengo información sobre esto en la Base de Conocimiento (carpeta "
@@ -764,21 +966,6 @@ class MainWindow(ctk.CTk):
             self.chat_panel.add_message(message)
 
         self._qa_log_service.log(original_text, reply_text, engine_name, source_filenames)
-
-    def _finish_ai_response_placeholder(self, original_text: str, source_filenames: str = "") -> None:
-        self.chat_panel.hide_typing_indicator()
-        self.chat_panel.set_generating(False)
-        self._generating_job = None
-
-        reply_text = (
-            "Todavía no tengo un motor de IA conectado, así que no puedo "
-            "responder de verdad. Conecta GitHub Copilot, OpenAI o Gemini "
-            "desde Configuración para procesar tu consulta sobre: "
-            f"\u00ab{original_text[:60]}\u00bb"
-        )
-        message = self._conversation_service.add_assistant_message(self._active_conversation_id, reply_text)
-        self.chat_panel.add_message(message)
-        self._qa_log_service.log(original_text, reply_text, "Offline", source_filenames)
 
     def _handle_stop_generation(self) -> None:
         self._stop_requested = True

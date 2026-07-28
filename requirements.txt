@@ -25,6 +25,9 @@ cryptography>=42.0
 sounddevice>=0.4
 numpy>=1.26
 
+# Exportar conversaciones a PDF (python-docx, ya en requirements, cubre Word)
+reportlab>=4.0
+
 # Base de Conocimiento: extracción de texto de PDF y Word
 pypdf>=4.0
 python-docx>=1.1
