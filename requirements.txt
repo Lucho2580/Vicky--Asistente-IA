@@ -19,6 +19,12 @@ msal>=1.30
 # a exigir checksum SHA-256 como mínimo (nunca instala sin verificar).
 cryptography>=42.0
 
+# Corrige un bug conocido de CustomTkinter en Windows: la ventana se
+# ve en negro/parpadea al restaurarla después de minimizarla
+# (https://github.com/TomSchimansky/CustomTkinter/issues/2664).
+# Específico de Windows; en Mac/Linux no se instala ni hace falta.
+pywinstyles>=1.8; sys_platform == "win32"
+
 # Chat de voz: grabación de micrófono (sounddevice) y transcripción
 # vía Whisper (OpenAI). Sin esto, el botón 🎤 avisa que no puede grabar
 # en vez de romper la app.
@@ -27,6 +33,14 @@ numpy>=1.26
 
 # Exportar conversaciones a PDF (python-docx, ya en requirements, cubre Word)
 reportlab>=4.0
+
+# Base de Conocimiento: análisis de Excel con cálculos reales (suma,
+# promedio, comparaciones por mes) en vez de que el modelo los estime
+# leyendo la tabla.
+pandas>=2.2
+openpyxl>=3.1
+xlrd>=2.0
+tabulate>=0.9
 
 # Base de Conocimiento: extracción de texto de PDF y Word
 pypdf>=4.0

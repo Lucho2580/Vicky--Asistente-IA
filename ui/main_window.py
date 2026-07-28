@@ -1,6 +1,8 @@
 import threading
 import base64
 import mimetypes
+import re
+import unicodedata
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -12,6 +14,7 @@ from core.app_logger import get_logger
 from core.audio_recorder import AudioRecorder, AudioRecordingError
 from core.greeting import build_greeting
 from core.version import APP_BUILD, APP_VERSION, BUILD_DATE
+from core.window_flicker_fix import reset_widget_opacity
 from database.knowledge_store import KnowledgeStore
 from models.message import Message, Sender
 from services.connection_log_service import ConnectionLogService
@@ -204,6 +207,24 @@ class MainWindow(ctk.CTk):
 
         if self._config.ai_credentials_locked:
             self._start_auto_connect_with_retry()
+
+        self.bind("<Map>", self._handle_window_restored)
+
+    def _handle_window_restored(self, _event=None) -> None:
+        self.after(50, self._reset_widgets_opacity)
+
+    def _reset_widgets_opacity(self) -> None:
+        for widget in (
+            self.sidebar,
+            self.content_header,
+            self.chat_panel,
+            self.history_panel,
+            self.settings_page,
+            self.help_page,
+            self.about_page,
+            self.status_bar,
+        ):
+            reset_widget_opacity(widget)
 
     def _maybe_check_for_updates_on_startup(self) -> None:
         if not self._config.settings.check_updates_on_startup:
@@ -416,6 +437,13 @@ class MainWindow(ctk.CTk):
         self._answer_queued_message(conversation_id, question)
 
     def _answer_queued_message(self, conversation_id: int, question: str) -> None:
+        if self._is_identity_question(question):
+            self._qa_log_service.log(question, self._IDENTITY_ANSWER, "Identidad fija", "")
+            message = self._conversation_service.add_assistant_message(conversation_id, self._IDENTITY_ANSWER)
+            self._deliver_queued_message(conversation_id, message)
+            self._continue_offline_queue()
+            return
+
         provider = self._active_provider
         if provider is None or not provider.is_connected():
             self._offline_queue.insert(0, (conversation_id, question))
@@ -592,7 +620,7 @@ class MainWindow(ctk.CTk):
         file_path = filedialog.askopenfilename(
             title="Adjuntar archivo",
             filetypes=[
-                ("Documentos e imágenes soportados", "*.txt *.md *.csv *.json *.log *.pdf *.docx *.png *.jpg *.jpeg *.webp *.gif"),
+                ("Documentos e imágenes soportados", "*.txt *.md *.csv *.json *.log *.pdf *.docx *.xlsx *.xls *.png *.jpg *.jpeg *.webp *.gif"),
                 ("Todos los archivos", "*.*"),
             ],
         )
@@ -833,6 +861,39 @@ class MainWindow(ctk.CTk):
 
         return question
 
+    _IDENTITY_ANSWER = (
+        "Me llamo Vicky. Soy un modelo de asistencia interno de La Vianda para ayudarte a "
+        "resolver dudas y problemas de la empresa."
+    )
+
+    _IDENTITY_QUESTION_PHRASES = (
+        "como te llamas",
+        "como te llamás",
+        "cual es tu nombre",
+        "cuál es tu nombre",
+        "quien eres",
+        "quién eres",
+        "que eres",
+        "qué eres",
+        "quien sos",
+        "quién sos",
+        "que sos",
+        "qué sos",
+        "quien es vicky",
+        "que es vicky",
+    )
+
+    @classmethod
+    def _normalize_for_match(cls, text: str) -> str:
+        text = text.lower().strip()
+        text = "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
+        text = re.sub(r"[^a-z0-9\s]", "", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _is_identity_question(self, question: str) -> bool:
+        normalized = self._normalize_for_match(question)
+        return any(phrase in normalized for phrase in (self._normalize_for_match(p) for p in self._IDENTITY_QUESTION_PHRASES))
+
     def _handle_regenerate_message(self, question: str) -> None:
         if self._active_conversation_id is None:
             return
@@ -846,6 +907,14 @@ class MainWindow(ctk.CTk):
         image_base64: str | None = None,
         image_mime_type: str | None = None,
     ) -> None:
+        if self._is_identity_question(question):
+            self._qa_log_service.log(question, self._IDENTITY_ANSWER, "Identidad fija", "")
+            message = self._conversation_service.add_assistant_message(
+                self._active_conversation_id, self._IDENTITY_ANSWER
+            )
+            self.chat_panel.add_message(message)
+            return
+
         embed_fn = self._active_provider.embed if self._active_provider is not None else None
         scored_matches = self._knowledge_base.search_with_scores(question, embed_fn=embed_fn)
         if scored_matches and not extra_context:

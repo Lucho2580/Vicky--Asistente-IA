@@ -132,10 +132,11 @@ class HelpPage(ctk.CTkScrollableFrame):
         self._add_card(
             "📎 Adjuntar archivos e imágenes",
             [
-                "Podés adjuntar documentos (.txt, .md, .csv, .json, .log, .pdf, .docx) o imágenes (.png, .jpg, .webp, .gif) desde el botón 📎 del chat.",
+                "Podés adjuntar documentos (.txt, .md, .csv, .json, .log, .pdf, .docx, .xlsx, .xls) o imágenes (.png, .jpg, .webp, .gif) desde el botón 📎 del chat.",
                 "El archivo queda pendiente (se ve como una etiqueta arriba del cuadro de texto) hasta que presionás Enviar — recién ahí se usa.",
                 "Se usa solo para responder esa pregunta puntual: no se guarda en la Base de Conocimiento ni queda disponible después.",
                 'Con imágenes podés preguntar cosas como "¿qué error es este?" adjuntando una captura de pantalla.',
+                "Con Excel (.xlsx, .xls), las sumas, promedios y totales por mes se calculan de verdad sobre todas las filas del archivo — no son una estimación de la IA leyendo la tabla.",
             ],
         )
 

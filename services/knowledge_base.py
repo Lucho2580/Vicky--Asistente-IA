@@ -8,7 +8,7 @@ from core.paths import TRAINING_DIR
 from database.knowledge_store import KnowledgeStore
 from models.training_file import TrainingFile
 
-SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".pdf", ".docx"}
+SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".pdf", ".docx", ".xlsx", ".xls"}
 
 MAX_CONTENT_LENGTH = 200_000
 MIN_KEYWORD_LENGTH = 3
@@ -54,17 +54,12 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
 
 
 def extract_text_from_file(path: Path, extension: str) -> str:
-    """
-    Extrae el texto de un archivo según su extensión. Punto único de
-    extracción usado por add_document, read_ephemeral_attachment y la
-    sincronización de la carpeta Training, para no repetir la lógica
-    (y el día que se agregue un formato nuevo, se agrega una sola vez
-    acá).
-    """
     if extension == ".pdf":
         return _extract_text_from_pdf(path)
     if extension == ".docx":
         return _extract_text_from_docx(path)
+    if extension in (".xlsx", ".xls"):
+        return _extract_text_from_excel(path)
     return path.read_text(encoding="utf-8", errors="replace")
 
 
@@ -78,14 +73,14 @@ def _extract_text_from_pdf(path: Path) -> str:
 
     try:
         reader = PdfReader(str(path))
-    except Exception as exc:  # noqa: BLE001 - PDF corrupto, cifrado, etc.
+    except Exception as exc:
         raise DocumentExtractionError(f"No se pudo abrir el PDF: {exc}") from exc
 
     pages_text = []
     for page in reader.pages:
         try:
             pages_text.append(page.extract_text() or "")
-        except Exception:  # noqa: BLE001 - una página rota no debe tirar todo el archivo
+        except Exception:
             continue
 
     text = "\n".join(pages_text).strip()
@@ -106,7 +101,7 @@ def _extract_text_from_docx(path: Path) -> str:
 
     try:
         document = docx.Document(str(path))
-    except Exception as exc:  # noqa: BLE001 - .docx corrupto o no es realmente un docx
+    except Exception as exc:
         raise DocumentExtractionError(f"No se pudo abrir el documento Word: {exc}") from exc
 
     parts = [p.text for p in document.paragraphs if p.text.strip()]
@@ -120,6 +115,102 @@ def _extract_text_from_docx(path: Path) -> str:
     if not text:
         raise DocumentExtractionError("El documento Word no tiene texto (¿está vacío?).")
     return text
+
+
+_EXCEL_PREVIEW_MAX_ROWS = 50
+
+
+def _extract_text_from_excel(path: Path) -> str:
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise DocumentExtractionError(
+            "Falta el paquete 'pandas' para leer archivos Excel (pip install pandas openpyxl)."
+        ) from exc
+
+    try:
+        sheets = pd.read_excel(path, sheet_name=None)
+    except Exception as exc:
+        raise DocumentExtractionError(f"No se pudo abrir el archivo Excel: {exc}") from exc
+
+    if not sheets:
+        raise DocumentExtractionError("El archivo Excel no tiene hojas con datos.")
+
+    sections = []
+    for sheet_name, df in sheets.items():
+        if df.empty:
+            sections.append(f"Hoja «{sheet_name}»: sin datos.")
+            continue
+        sections.append(_describe_excel_sheet(sheet_name, df))
+
+    text = "\n\n".join(sections).strip()
+    if not text:
+        raise DocumentExtractionError("El archivo Excel no tiene datos legibles.")
+    return text
+
+
+def _describe_excel_sheet(sheet_name: str, df) -> str:
+    import pandas as pd
+
+    n_rows, n_cols = df.shape
+    lines = [
+        f"Hoja «{sheet_name}»: {n_rows} filas x {n_cols} columnas.",
+        f"Columnas: {', '.join(str(c) for c in df.columns)}",
+    ]
+
+    numeric_cols = list(df.select_dtypes(include="number").columns)
+    if numeric_cols:
+        lines.append("")
+        lines.append("Estadísticas reales calculadas sobre TODAS las filas (no son una estimación):")
+        for col in numeric_cols:
+            series = df[col].dropna()
+            if series.empty:
+                continue
+            lines.append(
+                f"- {col}: suma={series.sum():,.2f} | promedio={series.mean():,.2f} | "
+                f"mínimo={series.min():,.2f} | máximo={series.max():,.2f} | cantidad={series.count()}"
+            )
+
+    date_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    if not date_cols:
+        for c in df.columns:
+            if df[c].dtype == object:
+                try:
+                    parsed = pd.to_datetime(df[c], errors="coerce")
+                except Exception:
+                    continue
+                if parsed.notna().mean() > 0.8:
+                    date_cols.append(c)
+
+    if date_cols and numeric_cols:
+        date_col = date_cols[0]
+        try:
+            temp = df.copy()
+            temp[date_col] = pd.to_datetime(temp[date_col], errors="coerce")
+            temp = temp.dropna(subset=[date_col])
+            if not temp.empty:
+                temp["_periodo"] = temp[date_col].dt.to_period("M").astype(str)
+                grouped = temp.groupby("_periodo")[numeric_cols].sum(numeric_only=True)
+                lines.append("")
+                lines.append(f"Totales agrupados por mes (columna de fecha: {date_col}):")
+                for periodo, row in grouped.iterrows():
+                    valores = ", ".join(f"{col}={row[col]:,.2f}" for col in numeric_cols)
+                    lines.append(f"- {periodo}: {valores}")
+        except Exception:
+            pass
+
+    preview_df = df.head(_EXCEL_PREVIEW_MAX_ROWS)
+    lines.append("")
+    if n_rows > _EXCEL_PREVIEW_MAX_ROWS:
+        lines.append(
+            f"Vista previa (primeras {_EXCEL_PREVIEW_MAX_ROWS} de {n_rows} filas totales; "
+            f"las estadísticas de arriba SÍ corresponden a las {n_rows} filas completas):"
+        )
+    else:
+        lines.append("Datos completos:")
+    lines.append(preview_df.to_markdown(index=False))
+
+    return "\n".join(lines)
 
 
 class KnowledgeBase:
@@ -137,7 +228,7 @@ class KnowledgeBase:
             supported = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
             raise UnsupportedFileTypeError(
                 f"Tipo de archivo '{extension or 'sin extensión'}' no soportado todavía. "
-                f"Por ahora se aceptan: {supported} (PDF/Word quedan para una próxima iteración)."
+                f"Por ahora se aceptan: {supported}"
             )
 
         content = extract_text_from_file(path, extension)[:MAX_CONTENT_LENGTH]
@@ -160,7 +251,7 @@ class KnowledgeBase:
             supported = ", ".join(sorted(SUPPORTED_TEXT_EXTENSIONS))
             raise UnsupportedFileTypeError(
                 f"Tipo de archivo '{extension or 'sin extensión'}' no soportado todavía. "
-                f"Por ahora se aceptan: {supported} (PDF/Word quedan para una próxima iteración)."
+                f"Por ahora se aceptan: {supported}"
             )
 
         content = extract_text_from_file(path, extension)[:MAX_CONTENT_LENGTH]
