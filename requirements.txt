@@ -1,55 +1,22 @@
-# Interfaz gráfica
-customtkinter>=5.2
+pywebview>=5.0
 
-# Manejo de imágenes (logo en la pantalla de login). customtkinter ya
-# depende de esto internamente, pero se deja explícito porque
-# ui/login_window.py también la usa directamente.
-Pillow>=10.0
-
-# Login con Microsoft (Entra ID / Azure AD), device code flow
 msal>=1.30
 
-# Opcional: si está instalado, la prueba de conexión a SQL Server usa una
-# conexión real; si no está instalado, se hace un fallback automático a una
-# prueba de conectividad de red (socket). La app funciona en ambos casos.
-# pyodbc
-
-# Verificación de firma digital de actualizaciones (Ed25519).
-# Ver core/update_security.py. Sin esto, el sistema de updates degrada
-# a exigir checksum SHA-256 como mínimo (nunca instala sin verificar).
 cryptography>=42.0
 
-# Corrige un bug conocido de CustomTkinter en Windows: la ventana se
-# ve en negro/parpadea al restaurarla después de minimizarla
-# (https://github.com/TomSchimansky/CustomTkinter/issues/2664).
-# Específico de Windows; en Mac/Linux no se instala ni hace falta.
-pywinstyles>=1.8; sys_platform == "win32"
-
-# Chat de voz: grabación de micrófono (sounddevice) y transcripción
-# vía Whisper (OpenAI). Sin esto, el botón 🎤 avisa que no puede grabar
-# en vez de romper la app.
 sounddevice>=0.4
 numpy>=1.26
 
-# Exportar conversaciones a PDF (python-docx, ya en requirements, cubre Word)
 reportlab>=4.0
 
-# Base de Conocimiento: análisis de Excel con cálculos reales (suma,
-# promedio, comparaciones por mes) en vez de que el modelo los estime
-# leyendo la tabla.
 pandas>=2.2
 openpyxl>=3.1
 xlrd>=2.0
 tabulate>=0.9
 
-# Base de Conocimiento: extracción de texto de PDF y Word
 pypdf>=4.0
 python-docx>=1.1
 
-# Almacenamiento seguro de credenciales (API keys, contraseña de BD)
-# en el llavero nativo del SO: Windows Credential Manager / macOS
-# Keychain / Secret Service (Linux), en vez de texto plano en disco.
 keyring>=25.0
 
-# Calidad / desarrollo
 pytest>=8.0

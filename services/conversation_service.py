@@ -27,6 +27,10 @@ class ConversationService:
         self._maybe_set_title(conversation_id, text)
         return message
 
+    def edit_user_message(self, conversation_id: int, message_id: int, new_text: str) -> Message:
+        self._store.delete_messages_from(conversation_id, message_id)
+        return self.add_user_message(conversation_id, new_text)
+
     def add_assistant_message(self, conversation_id: int, text: str) -> Message:
         return self._store.add_message(conversation_id, Sender.ASSISTANT.value, text)
 
@@ -36,6 +40,10 @@ class ConversationService:
             return
         if conversation.message_count == 1 and conversation.title == "Nueva conversación":
             self._store.update_title(conversation_id, self._truncate_title(first_user_text))
+
+    def set_title(self, conversation_id: int, title: str) -> None:
+        clean_title = self._truncate_title(title)
+        self._store.update_title(conversation_id, clean_title)
 
     @staticmethod
     def _truncate_title(text: str, max_length: int = TITLE_MAX_LENGTH) -> str:

@@ -97,22 +97,29 @@ class ConversationStore:
 
     def add_message(self, conversation_id: int, role: str, content: str) -> Message:
         now = datetime.now().isoformat(timespec="seconds")
-        self._connection.execute(
+        cursor = self._connection.execute(
             "INSERT INTO messages (conversation_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
             (conversation_id, role, content, now),
         )
         self._connection.commit()
-        return Message(content=content, sender=Sender(role), timestamp=_extract_time(now))
+        return Message(id=cursor.lastrowid, content=content, sender=Sender(role), timestamp=_extract_time(now))
 
     def get_messages(self, conversation_id: int) -> List[Message]:
         rows = self._connection.execute(
-            "SELECT role, content, timestamp FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC, id ASC",
+            "SELECT id, role, content, timestamp FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC, id ASC",
             (conversation_id,),
         ).fetchall()
         return [
-            Message(content=row["content"], sender=Sender(row["role"]), timestamp=_extract_time(row["timestamp"]))
+            Message(id=row["id"], content=row["content"], sender=Sender(row["role"]), timestamp=_extract_time(row["timestamp"]))
             for row in rows
         ]
+
+    def delete_messages_from(self, conversation_id: int, message_id: int) -> None:
+        self._connection.execute(
+            "DELETE FROM messages WHERE conversation_id = ? AND id >= ?",
+            (conversation_id, message_id),
+        )
+        self._connection.commit()
 
     def close(self) -> None:
         self._connection.close()

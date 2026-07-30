@@ -15,6 +15,7 @@ class Message:
     content: str
     sender: Sender
     timestamp: str = field(default_factory=lambda: datetime.now().strftime("%H:%M"))
+    id: int = 0
 
     @property
     def is_user(self) -> bool:
