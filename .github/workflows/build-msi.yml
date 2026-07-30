@@ -1,6 +1,6 @@
 name: Build Windows MSI
 
-# Genera el instalador .msi de "Vicky Consulting" en un runner
+# Genera el instalador .msi de "Vicky" en un runner
 # real de Windows (windows-latest), sin que necesites tener Windows en
 # tu propia computadora. El .msi resultante queda disponible para
 # descargar como "artifact" del workflow.
@@ -148,5 +148,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist\AsistenteIA-Setup.msi
-          name: Vicky Consulting ${{ github.ref_name }}
+          name: Vicky ${{ github.ref_name }}
           generate_release_notes: true

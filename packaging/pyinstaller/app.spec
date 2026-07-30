@@ -25,9 +25,8 @@ APP_NAME = "AsistenteIA"
 
 datas = collect_data_files("webview")
 datas += [(os.path.join(PROJECT_ROOT, "web_ui", "templates"), "web_ui/templates")]
-datas += [(os.path.join(PROJECT_ROOT, "ui", "assets"), "ui/assets")]
 
-hidden_imports = collect_submodules("webview") + collect_submodules("PIL") + ["PIL._tkinter_finder"]
+hidden_imports = collect_submodules("webview")
 
 block_cipher = None
 
