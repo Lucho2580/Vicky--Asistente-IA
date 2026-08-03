@@ -33,7 +33,7 @@ class TestAuthGuard:
             ok, result = client.list_recent_messages()
             mock_open.assert_not_called()
         assert ok is False
-        assert "sesión" in result.lower()
+        assert "permisos" in result.lower() or "consentimiento" in result.lower()
 
 
 class TestListRecentMessages:

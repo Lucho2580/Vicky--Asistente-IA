@@ -14,20 +14,24 @@ ENV_TENANT_ID_KEY = "ASISTENTEIA_MS_TENANT_ID"
 DEFAULT_TENANT_ID = "common"
 GRAPH_ME_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
 
-# "User.Read" alcanza solo para el login (nombre del usuario). Para leer
-# correo y crear tickets en una Lista de SharePoint hacen falta estos
-# permisos adicionales de Microsoft Graph:
-#   - Mail.Read           → leer el buzón para detectar solicitudes de ticket
-#   - Sites.ReadWrite.All → crear elementos en la Lista de SharePoint
-# Estos dos últimos suelen requerir consentimiento de un administrador de
-# Microsoft 365 la primera vez que alguien de la organización inicia sesión
-# (Entra ID > Enterprise Applications > Permisos, o el propio prompt de
-# consentimiento durante el login). Si tu organización prefiere acotar el
-# acceso a un único sitio en vez de "todos los sitios", se puede reemplazar
-# Sites.ReadWrite.All por Sites.Selected, pero eso exige un paso extra de
-# configuración (otorgar acceso a ese sitio puntual vía Graph con permisos
-# de aplicación) que no se puede hacer solo con este login de usuario.
-SCOPES = ["User.Read", "Mail.Read", "Sites.ReadWrite.All"]
+# El login básico (para poder abrir la app y chatear) solo necesita "User.Read",
+# que NUNCA requiere aprobación de un administrador de Microsoft 365 — por eso
+# funcionaba antes para cualquier cuenta corporativa.
+SCOPES = ["User.Read"]
+
+# Estos son permisos ADICIONALES, separados del login básico, que solo se piden
+# cuando alguien efectivamente usa la función de tickets (leer correo / escribir
+# en la Lista de SharePoint). Mail.Read y Sites.ReadWrite.All suelen requerir
+# consentimiento de un administrador de Microsoft 365 — si no está otorgado,
+# Microsoft muestra la pantalla de "Se necesita la aprobación del administrador".
+# Por eso NO van mezclados con el login básico: así ese bloqueo afecta solo a
+# quien intenta crear/revisar tickets, no a todo el que abre la app.
+# Si tu organización prefiere acotar el acceso a un único sitio en vez de "todos
+# los sitios", se puede reemplazar Sites.ReadWrite.All por Sites.Selected, pero
+# eso exige un paso extra de configuración (otorgar acceso a ese sitio puntual
+# vía Graph con permisos de aplicación) que no se puede hacer solo con este
+# login de usuario.
+TICKET_SCOPES = ["Mail.Read", "Sites.ReadWrite.All"]
 
 TOKEN_CACHE_PATH = USER_DATA_DIR / "ms_token_cache.bin"
 
@@ -83,7 +87,9 @@ class MicrosoftAuthService:
         except OSError:
             pass
 
-    def try_silent_login(self) -> Optional[dict]:
+    def try_silent_login(self, scopes: Optional[list] = None) -> Optional[dict]:
+        scopes = scopes or SCOPES
+
         if not is_configured():
             return None
 
@@ -99,7 +105,7 @@ class MicrosoftAuthService:
             return None
 
         try:
-            result = app.acquire_token_silent(SCOPES, account=accounts[0])
+            result = app.acquire_token_silent(scopes, account=accounts[0])
         except Exception as exc:
             get_logger().warning("Login silencioso: acquire_token_silent lanzó una excepción: %s", exc)
             return None
@@ -112,21 +118,22 @@ class MicrosoftAuthService:
         error = (result or {}).get("error")
         error_description = (result or {}).get("error_description")
         if error:
-            # Típicamente pasa cuando se agregaron scopes nuevos (ej. Mail.Read,
-            # Sites.ReadWrite.All) después del último login y la cuenta cacheada
-            # todavía no los tiene consentidos — MSAL no puede resolverlo sin
-            # interacción. Un login interactivo (device code) una sola vez
-            # vuelve a dejar el login silencioso funcionando en los siguientes
-            # inicios de la app.
+            # Con los scopes básicos (User.Read) esto casi no debería pasar.
+            # Con TICKET_SCOPES (Mail.Read, Sites.ReadWrite.All) es esperable
+            # si un administrador de Microsoft 365 todavía no aprobó esos
+            # permisos para la app — en ese caso hace falta consentimiento de
+            # admin, no alcanza con loguearse de nuevo como usuario normal.
             get_logger().info(
-                "Login silencioso no disponible (%s): %s. Requiere un login interactivo para renovar el consentimiento.",
-                error, error_description,
+                "Login silencioso no disponible para scopes %s (%s): %s",
+                scopes, error, error_description,
             )
         return None
 
     def login_with_device_code(
-        self, on_code_ready: Callable[[str, str], None]
+        self, on_code_ready: Callable[[str, str], None], scopes: Optional[list] = None
     ) -> Tuple[bool, Optional[dict], str]:
+        scopes = scopes or SCOPES
+
         if not is_configured():
             return False, None, (
                 f"El login con Microsoft no está configurado todavía: falta la variable de entorno "
@@ -139,7 +146,7 @@ class MicrosoftAuthService:
             return False, None, f"No se pudo conectar con Microsoft: {exc}"
 
         try:
-            flow = app.initiate_device_flow(scopes=SCOPES)
+            flow = app.initiate_device_flow(scopes=scopes)
         except Exception as exc:
             return False, None, f"No se pudo iniciar el login con Microsoft: {exc}"
 
@@ -158,7 +165,15 @@ class MicrosoftAuthService:
         if result and "access_token" in result:
             return True, result, "Sesión iniciada correctamente."
 
+        error = (result or {}).get("error", "")
         error_description = (result or {}).get("error_description", "No se pudo completar el login.")
+        if "admin" in error_description.lower() or error in ("access_denied", "unauthorized_client"):
+            error_description = (
+                "Tu cuenta de Microsoft 365 necesita que un administrador apruebe permisos "
+                "adicionales para esta app (Mail.Read, Sites.ReadWrite.All, usados para la función "
+                "de tickets). Pedile a IT que otorgue el consentimiento, o iniciá sesión únicamente "
+                "para usar el chat (sin tickets) si esto pasó al intentar usar esa función."
+            )
         return False, None, error_description
 
     @staticmethod
@@ -201,19 +216,33 @@ class MicrosoftAuthService:
             "officeLocation": data.get("officeLocation"),
         }
 
-    def get_cached_access_token(self) -> Optional[str]:
+    def get_cached_access_token(self, scopes: Optional[list] = None) -> Optional[str]:
         """
         Devuelve un access token válido usando solo el caché local (sin
         interacción). Lo usan los servicios en segundo plano (ej. el chequeo
         periódico de correo para tickets) que no pueden mostrarle un código
-        de login a nadie. Si no hay sesión cacheada con los scopes
-        necesarios, devuelve None — quien llama debe pedirle al usuario que
-        inicie sesión una vez desde la UI para otorgar el consentimiento.
+        de login a nadie. Por defecto pide solo los scopes del login básico;
+        las funciones de tickets deben pasar explícitamente TICKET_SCOPES
+        (combinados con SCOPES) para no afectar el login normal de nadie.
+        Si no hay sesión cacheada con esos scopes, devuelve None — quien
+        llama debe pedirle al usuario que otorgue ese permiso puntual.
         """
-        result = self.try_silent_login()
+        result = self.try_silent_login(scopes=scopes)
         if result and "access_token" in result:
             return result["access_token"]
         return None
+
+    def request_ticket_scopes(
+        self, on_code_ready: Callable[[str, str], None]
+    ) -> Tuple[bool, Optional[dict], str]:
+        """
+        Login interactivo (device code) pidiendo específicamente los scopes
+        de tickets (Mail.Read, Sites.ReadWrite.All) además del login básico.
+        Se usa solo cuando alguien intenta crear/revisar tickets y no hay
+        todavía un token cacheado con esos permisos — nunca durante el login
+        normal de la app.
+        """
+        return self.login_with_device_code(on_code_ready, scopes=SCOPES + TICKET_SCOPES)
 
     def logout(self) -> None:
         if TOKEN_CACHE_PATH.exists():

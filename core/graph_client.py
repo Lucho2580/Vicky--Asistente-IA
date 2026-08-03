@@ -4,7 +4,7 @@ import urllib.parse
 import urllib.request
 from typing import Optional, Tuple
 
-from core.microsoft_auth import MicrosoftAuthService
+from core.microsoft_auth import SCOPES, TICKET_SCOPES, MicrosoftAuthService
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 REQUEST_TIMEOUT_SECONDS = 15
@@ -31,12 +31,14 @@ class GraphClient:
     def _request(
         self, method: str, path_or_url: str, json_body: Optional[dict] = None
     ) -> Tuple[Optional[int], Optional[dict], Optional[str]]:
-        token = self._auth_service.get_cached_access_token()
+        token = self._auth_service.get_cached_access_token(scopes=SCOPES + TICKET_SCOPES)
         if not token:
             return None, None, (
-                "No hay una sesión de Microsoft activa con los permisos necesarios. "
-                "Iniciá sesión desde la app (Configuración > Cuenta) para otorgar acceso "
-                "a correo y SharePoint."
+                "Esta función necesita permisos adicionales (correo y SharePoint) que todavía no están "
+                "otorgados para tu cuenta. Puede ser que: (1) nunca se pidió ese permiso — probá desde la "
+                "app la opción para habilitar tickets, o (2) un administrador de Microsoft 365 todavía no "
+                "aprobó esos permisos para la app 'Asistente IA La Vianda' — en ese caso pedile a IT que "
+                "otorgue el consentimiento en Microsoft Entra ID."
             )
 
         url = path_or_url if path_or_url.startswith("http") else f"{GRAPH_BASE}{path_or_url}"
