@@ -737,11 +737,161 @@ window.vickyEvent = function (event, payload) {
     }
   } else if (event === "update_check_result") {
     const note = document.getElementById("about-note");
-    if (payload.error) note.textContent = "Error: " + payload.error;
-    else if (payload.available) note.textContent = `Hay una versión nueva: ${payload.version}`;
-    else note.textContent = "Ya estás en la última versión.";
+    if (payload.error) {
+      note.textContent = "Error: " + payload.error;
+    } else if (payload.available) {
+      note.textContent = `Hay una versión nueva: ${payload.version}`;
+      openUpdateModal(payload);
+    } else {
+      note.textContent = "Ya estás en la última versión.";
+    }
+  } else if (event === "update_download_progress") {
+    const fill = document.getElementById("update-progress-fill");
+    const percentEl = document.getElementById("update-progress-percent");
+    const speedEl = document.getElementById("update-progress-speed");
+    const pct = Math.min(100, Math.round(payload.percent || 0));
+    fill.style.width = pct + "%";
+    percentEl.textContent = pct + "%";
+    speedEl.textContent = payload.speedBytesPerSec ? formatBytesPerSec(payload.speedBytesPerSec) : "";
+  } else if (event === "update_download_complete") {
+    onUpdateDownloadComplete(payload);
   }
 };
+
+function formatBytesPerSec(bytesPerSec) {
+  if (bytesPerSec > 1024 * 1024) return (bytesPerSec / (1024 * 1024)).toFixed(1) + " MB/s";
+  if (bytesPerSec > 1024) return (bytesPerSec / 1024).toFixed(0) + " KB/s";
+  return Math.round(bytesPerSec) + " B/s";
+}
+
+function setUpdateModalMessage(text, tone) {
+  const el = document.getElementById("update-modal-message");
+  el.innerHTML = "";
+  if (!text) { el.style.display = "none"; return; }
+  el.style.display = "flex";
+  if (tone) {
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    dot.style.background = tone;
+    el.appendChild(dot);
+  }
+  const span = document.createElement("span");
+  span.style.color = tone || "var(--text-600)";
+  span.textContent = text;
+  el.appendChild(span);
+}
+
+function openUpdateModal(payload) {
+  document.getElementById("update-modal-version").textContent = payload.version;
+  const notesEl = document.getElementById("update-modal-notes");
+  notesEl.innerHTML = "";
+  (payload.notes || []).forEach((n) => {
+    const li = document.createElement("li");
+    li.textContent = n;
+    notesEl.appendChild(li);
+  });
+  document.getElementById("update-modal-title").textContent = "Hay una versión nueva disponible";
+  document.getElementById("update-modal-progress").style.display = "none";
+  setUpdateModalMessage("");
+
+  const actions = document.getElementById("update-modal-actions");
+  actions.innerHTML = "";
+  const laterBtn = document.createElement("button");
+  laterBtn.className = "btn";
+  laterBtn.textContent = "Más tarde";
+  laterBtn.addEventListener("click", closeUpdateModal);
+  const nowBtn = document.createElement("button");
+  nowBtn.className = "btn primary";
+  nowBtn.textContent = "Actualizar ahora";
+  nowBtn.addEventListener("click", startUpdateDownload);
+  actions.appendChild(laterBtn);
+  actions.appendChild(nowBtn);
+
+  document.getElementById("update-modal-overlay").classList.add("active");
+}
+
+function closeUpdateModal() {
+  document.getElementById("update-modal-overlay").classList.remove("active");
+}
+
+async function startUpdateDownload() {
+  document.getElementById("update-modal-title").textContent = "Descargando actualización...";
+  document.getElementById("update-modal-progress").style.display = "block";
+  document.getElementById("update-progress-fill").style.width = "0%";
+  document.getElementById("update-progress-percent").textContent = "0%";
+  document.getElementById("update-progress-speed").textContent = "";
+  setUpdateModalMessage("");
+
+  const actions = document.getElementById("update-modal-actions");
+  actions.innerHTML = "";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn";
+  cancelBtn.textContent = "Cancelar";
+  cancelBtn.addEventListener("click", async () => {
+    await api().cancel_update_download();
+    closeUpdateModal();
+  });
+  actions.appendChild(cancelBtn);
+
+  const result = await api().download_update_now();
+  if (!result.ok) {
+    setUpdateModalMessage(result.error || "No se pudo iniciar la descarga.", "var(--status-red)");
+    actions.innerHTML = "";
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "btn primary";
+    retryBtn.textContent = "Reintentar";
+    retryBtn.addEventListener("click", startUpdateDownload);
+    actions.appendChild(retryBtn);
+  }
+}
+
+function onUpdateDownloadComplete(payload) {
+  const actions = document.getElementById("update-modal-actions");
+  actions.innerHTML = "";
+
+  if (!payload.ok) {
+    document.getElementById("update-modal-title").textContent = "No se pudo descargar la actualización";
+    setUpdateModalMessage(payload.error || "Error desconocido durante la descarga.", "var(--status-red)");
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "btn primary";
+    retryBtn.textContent = "Reintentar";
+    retryBtn.addEventListener("click", startUpdateDownload);
+    actions.appendChild(retryBtn);
+    return;
+  }
+
+  document.getElementById("update-modal-title").textContent = "Actualización lista para instalar";
+  document.getElementById("update-progress-fill").style.width = "100%";
+  document.getElementById("update-progress-percent").textContent = "100%";
+  setUpdateModalMessage("Descarga verificada correctamente.", "var(--status-green)");
+
+  const laterBtn = document.createElement("button");
+  laterBtn.className = "btn";
+  laterBtn.textContent = "Más tarde";
+  laterBtn.addEventListener("click", closeUpdateModal);
+
+  const installBtn = document.createElement("button");
+  installBtn.className = "btn primary";
+  installBtn.textContent = "Instalar y reiniciar";
+  installBtn.addEventListener("click", async () => {
+    installBtn.disabled = true;
+    installBtn.textContent = "Instalando...";
+    setUpdateModalMessage("Vicky se va a cerrar para completar la instalación...", "var(--text-600)");
+    const result = await api().install_update_now();
+    if (!result.ok) {
+      installBtn.disabled = false;
+      installBtn.textContent = "Instalar y reiniciar";
+      setUpdateModalMessage(result.error || "No se pudo iniciar el instalador.", "var(--status-red)");
+    }
+  });
+
+  actions.appendChild(laterBtn);
+  actions.appendChild(installBtn);
+}
+
+document.getElementById("update-modal-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "update-modal-overlay") closeUpdateModal();
+});
 
 window.addEventListener("pywebviewready", async () => {
   const configured = await api().login_is_configured();

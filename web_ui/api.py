@@ -5,6 +5,7 @@ import platform
 import re
 import tempfile
 import threading
+import time
 import unicodedata
 from pathlib import Path
 from typing import Optional
@@ -101,6 +102,9 @@ class Api:
         self._audio_recorder = AudioRecorder()
         self._auth_service = MicrosoftAuthService()
         self._ticket_service = TicketService(graph_client=GraphClient(self._auth_service))
+        self._pending_update_info = None
+        self._pending_installer_path: Optional[str] = None
+        self._update_download_cancelled = False
 
     def set_window(self, window: webview.Window) -> None:
         self._window = window
@@ -753,10 +757,74 @@ class Api:
             if error:
                 self._push("update_check_result", {"available": False, "error": error})
             elif update_info:
+                self._pending_update_info = update_info
                 self._push("update_check_result", {
                     "available": True, "version": update_info.version, "notes": update_info.release_notes,
+                    "mandatory": update_info.mandatory,
                 })
             else:
                 self._push("update_check_result", {"available": False})
 
         self._update_manager.check_for_updates(on_result)
+
+    def download_update_now(self) -> dict:
+        """
+        Descarga el instalador de la actualización detectada por
+        check_updates_now(), con progreso vía eventos 'update_download_progress'
+        y resultado final vía 'update_download_complete'. La verificación de
+        integridad (firma o checksum) la hace UpdateManager antes de avisar éxito.
+        """
+        if self._pending_update_info is None:
+            return {"ok": False, "error": "No hay una actualización detectada todavía. Buscá actualizaciones primero."}
+
+        self._update_download_cancelled = False
+
+        def on_progress(downloaded: int, total: int, speed: float, percent: float) -> None:
+            self._push("update_download_progress", {
+                "downloaded": downloaded, "total": total, "speedBytesPerSec": speed, "percent": percent,
+            })
+
+        def on_complete(success: bool, installer_path: Optional[str], error: Optional[str]) -> None:
+            if success:
+                self._pending_installer_path = installer_path
+                self._push("update_download_complete", {"ok": True})
+            else:
+                self._push("update_download_complete", {"ok": False, "error": error})
+
+        self._update_manager.download_update(
+            self._pending_update_info, on_progress, on_complete,
+            should_cancel=lambda: self._update_download_cancelled,
+        )
+        return {"ok": True}
+
+    def cancel_update_download(self) -> None:
+        self._update_download_cancelled = True
+
+    def install_update_now(self) -> dict:
+        """
+        Lanza el instalador ya descargado y verificado. La app se cierra unos
+        instantes después para que el instalador pueda reemplazar los archivos
+        en uso — el instalador es quien vuelve a abrir la app al terminar.
+        Se llama únicamente cuando el usuario confirma explícitamente en el
+        modal de actualización, nunca automáticamente.
+        """
+        if not self._pending_installer_path:
+            return {"ok": False, "error": "No hay un instalador descargado todavía."}
+
+        settings = self._config.settings
+        success, error = self._update_manager.install_update(
+            self._pending_installer_path, silent=settings.silent_updates_enabled
+        )
+        if not success:
+            return {"ok": False, "error": error}
+
+        def close_soon() -> None:
+            time.sleep(1.5)
+            if self._window is not None:
+                try:
+                    self._window.destroy()
+                except Exception:
+                    pass
+
+        threading.Thread(target=close_soon, daemon=True).start()
+        return {"ok": True}

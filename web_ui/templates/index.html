@@ -397,6 +397,34 @@
   .form-field-hint span:last-child { flex-shrink: 0; font-family: 'Cascadia Code', Consolas, 'Courier New', monospace; }
   .form-field-hint.over-limit span { color: var(--status-red); }
   .form-field-optional { font-weight: 400; color: var(--text-500); text-transform: none; letter-spacing: 0; }
+
+  /* ---------- Modal de actualización ---------- */
+  #update-modal-overlay {
+    position: fixed; inset: 0; background: rgba(20,18,16,0.5); z-index: 100;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  #update-modal-overlay.active { display: flex; }
+  #update-modal {
+    background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+    width: 100%; max-width: 400px; padding: 28px 26px; text-align: center;
+  }
+  .update-modal-icon {
+    width: 46px; height: 46px; border-radius: 12px; margin: 0 auto 14px;
+    background: linear-gradient(135deg, var(--red-600), var(--red-700)); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;
+  }
+  .update-modal-title { font-size: 16px; font-weight: 800; color: var(--text-900); letter-spacing: -0.01em; }
+  .update-modal-desc { font-size: 12.5px; color: var(--text-600); margin-top: 4px; }
+  .update-modal-notes { text-align: left; font-size: 12px; color: var(--text-600); margin: 14px 0 0; padding-left: 18px; max-height: 110px; overflow-y: auto; }
+  .update-modal-notes li { margin-bottom: 4px; }
+  .update-modal-notes:empty { display: none; }
+  .update-progress-track { height: 8px; border-radius: 999px; background: var(--surface-sunken); overflow: hidden; margin-top: 18px; }
+  .update-progress-fill { height: 100%; width: 0%; background: linear-gradient(135deg, var(--red-600), var(--red-700)); transition: width 0.2s var(--ease); }
+  .update-progress-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-500); margin-top: 6px; font-family: 'Cascadia Code', Consolas, 'Courier New', monospace; }
+  #update-modal-message { margin-top: 16px; font-size: 12.5px; display: flex; align-items: center; justify-content: center; gap: 7px; }
+  #update-modal-message .status-dot { width: 6px; height: 6px; }
+  .update-modal-actions { display: flex; gap: 10px; margin-top: 22px; }
+  .update-modal-actions .btn { flex: 1; margin-right: 0; justify-content: center; display: flex; }
 </style>
 </head>
 <body>
@@ -741,6 +769,30 @@
 
       <button class="btn primary" id="btn-submit-guest-ticket" style="width:100%;justify-content:center;display:flex;margin:6px 0 0;">Enviar ticket</button>
       <div id="guest-ticket-message" style="margin-top:12px;font-size:12.5px;"></div>
+    </div>
+  </div>
+</div>
+
+<div id="update-modal-overlay">
+  <div id="update-modal">
+    <div class="update-modal-icon">⬆</div>
+    <div class="update-modal-title" id="update-modal-title">Hay una versión nueva disponible</div>
+    <div class="update-modal-desc" id="update-modal-desc">Versión <span id="update-modal-version">—</span></div>
+    <ul class="update-modal-notes" id="update-modal-notes"></ul>
+
+    <div id="update-modal-progress" style="display:none;">
+      <div class="update-progress-track"><div class="update-progress-fill" id="update-progress-fill"></div></div>
+      <div class="update-progress-meta">
+        <span id="update-progress-percent">0%</span>
+        <span id="update-progress-speed"></span>
+      </div>
+    </div>
+
+    <div id="update-modal-message" style="display:none;"></div>
+
+    <div class="update-modal-actions" id="update-modal-actions">
+      <button class="btn" id="btn-update-later">Más tarde</button>
+      <button class="btn primary" id="btn-update-now">Actualizar ahora</button>
     </div>
   </div>
 </div>
