@@ -678,9 +678,43 @@ function enterApp(displayName) {
 
 window.vickyEvent = function (event, payload) {
   if (event === "login_code_ready") {
-    document.getElementById("login-code-box").style.display = "block";
-    document.getElementById("login-code-box").innerHTML =
-      `Andá a <b>${payload.url}</b> e ingresá el código:<br><b style="font-size:18px;">${payload.code}</b>`;
+    const box = document.getElementById("login-code-box");
+    box.style.display = "block";
+    box.innerHTML = `
+      <div class="device-code-card">
+        <div class="device-code-label">Verificá el inicio de sesión</div>
+        <div class="device-code-desc">
+          Se abrió <a href="${payload.url}" id="device-code-link">${payload.url}</a> en tu navegador.
+          Si no se abrió sola, entrá manualmente e ingresá este código:
+        </div>
+        <div class="device-code-value-row">
+          <span class="device-code-value" id="device-code-value">${payload.code}</span>
+          <button class="device-code-copy-btn" id="device-code-copy-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="11" height="11" rx="1.6"/><path d="M15.5 8.5V6.6A1.6 1.6 0 0 0 13.9 5H6.6A1.6 1.6 0 0 0 5 6.6v7.3a1.6 1.6 0 0 0 1.6 1.6h1.9"/></svg>
+            <span id="device-code-copy-label">Copiar</span>
+          </button>
+        </div>
+      </div>`;
+
+    document.getElementById("device-code-link").addEventListener("click", (e) => {
+      e.preventDefault();
+      window.open(payload.url, "_blank");
+    });
+
+    document.getElementById("device-code-copy-btn").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      try {
+        await navigator.clipboard.writeText(payload.code);
+        btn.classList.add("copied");
+        document.getElementById("device-code-copy-label").textContent = "¡Copiado!";
+        setTimeout(() => {
+          btn.classList.remove("copied");
+          document.getElementById("device-code-copy-label").textContent = "Copiar";
+        }, 1800);
+      } catch (err) {
+        document.getElementById("device-code-copy-label").textContent = "No se pudo copiar";
+      }
+    });
   } else if (event === "login_complete") {
     if (payload.success) {
       enterApp(payload.displayName);
@@ -901,8 +935,15 @@ window.addEventListener("pywebviewready", async () => {
     return;
   }
 
+  const loginMessage = document.getElementById("login-message");
+  loginMessage.textContent = "Verificando si ya iniciaste sesión antes...";
+
   const silent = await api().try_silent_login();
-  if (silent.success) { enterApp(silent.displayName); }
+  if (silent.success) {
+    enterApp(silent.displayName);
+  } else {
+    loginMessage.textContent = "";
+  }
 });
 
 document.addEventListener("keydown", (e) => {

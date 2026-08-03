@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Optional, Tuple
 
+from core.app_logger import get_logger
 from core.env_config import load_environment
 from core.paths import USER_DATA_DIR
 
@@ -88,17 +89,39 @@ class MicrosoftAuthService:
 
         try:
             app = self._build_app()
-        except Exception:
+        except Exception as exc:
+            get_logger().warning("Login silencioso: no se pudo construir la app MSAL: %s", exc)
             return None
 
         accounts = app.get_accounts()
         if not accounts:
+            get_logger().info("Login silencioso: no hay ninguna cuenta cacheada todavía.")
             return None
 
-        result = app.acquire_token_silent(SCOPES, account=accounts[0])
+        try:
+            result = app.acquire_token_silent(SCOPES, account=accounts[0])
+        except Exception as exc:
+            get_logger().warning("Login silencioso: acquire_token_silent lanzó una excepción: %s", exc)
+            return None
+
         self._save_cache()
+
         if result and "access_token" in result:
             return result
+
+        error = (result or {}).get("error")
+        error_description = (result or {}).get("error_description")
+        if error:
+            # Típicamente pasa cuando se agregaron scopes nuevos (ej. Mail.Read,
+            # Sites.ReadWrite.All) después del último login y la cuenta cacheada
+            # todavía no los tiene consentidos — MSAL no puede resolverlo sin
+            # interacción. Un login interactivo (device code) una sola vez
+            # vuelve a dejar el login silencioso funcionando en los siguientes
+            # inicios de la app.
+            get_logger().info(
+                "Login silencioso no disponible (%s): %s. Requiere un login interactivo para renovar el consentimiento.",
+                error, error_description,
+            )
         return None
 
     def login_with_device_code(

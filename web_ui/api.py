@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +19,7 @@ from ai.llama import LlamaProvider
 from ai.openai import OpenAIProvider
 from config.app_config import AppConfig
 from core.audio_recorder import AudioRecorder, AudioRecordingError, has_input_device
+from core.app_logger import get_logger
 from core.graph_client import GraphClient
 from core.microsoft_auth import MicrosoftAuthService
 from core.microsoft_auth import is_configured as ms_login_configured
@@ -131,6 +133,10 @@ class Api:
     def start_device_login(self) -> None:
         def on_code_ready(code: str, url: str) -> None:
             self._push("login_code_ready", {"code": code, "url": url})
+            try:
+                webbrowser.open(url)
+            except Exception as exc:
+                get_logger().warning("No se pudo abrir el navegador automáticamente: %s", exc)
 
         def worker() -> None:
             success, result, message = self._auth_service.login_with_device_code(on_code_ready)

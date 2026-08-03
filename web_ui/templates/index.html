@@ -352,6 +352,30 @@
   .login-card-footnote a { color: var(--red-600); font-weight: 600; text-decoration: none; cursor: pointer; }
   .login-card-footnote a:hover { text-decoration: underline; }
 
+  /* ---------- Código de verificación de dispositivo ---------- */
+  .device-code-card {
+    margin-top: 18px; background: var(--surface-sunken); border: 1px solid var(--line);
+    border-radius: var(--radius-md); padding: 16px 18px; text-align: left;
+  }
+  .device-code-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--red-600); margin-bottom: 6px; }
+  .device-code-desc { font-size: 12px; color: var(--text-600); line-height: 1.5; }
+  .device-code-desc a { color: var(--text-900); font-weight: 600; text-decoration: underline; }
+  .device-code-value-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .device-code-value {
+    flex: 1; background: var(--surface); border: 1px dashed var(--line); border-radius: var(--radius-sm);
+    padding: 10px 12px; font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+    font-size: 17px; font-weight: 700; letter-spacing: 0.12em; color: var(--text-900); text-align: center;
+  }
+  .device-code-copy-btn {
+    flex-shrink: 0; display: flex; align-items: center; gap: 6px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 13px;
+    font-size: 12px; font-weight: 700; color: var(--text-900); cursor: pointer;
+    transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
+  }
+  .device-code-copy-btn:hover { border-color: var(--red-600); color: var(--red-600); }
+  .device-code-copy-btn.copied { border-color: var(--status-green); color: var(--status-green); }
+  .device-code-copy-btn svg { width: 14px; height: 14px; }
+
   /* ---------- Vista restringida: crear ticket sin sesión ---------- */
   #guest-ticket-view { background: var(--paper); }
   #guest-ticket-topbar {
@@ -464,7 +488,7 @@
         <span>Continuar con Microsoft</span>
       </button>
 
-      <div id="login-code-box" style="display:none;margin-top:16px;font-size:13px;"></div>
+      <div id="login-code-box" style="display:none;"></div>
       <div id="login-message" style="margin-top:12px;font-size:12px;color:var(--text-600);"></div>
 
       <div class="login-card-footnote">¿No podés ingresar? <a href="#" id="link-contact-it">Creá un ticket de soporte</a></div>
