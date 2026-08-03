@@ -12,7 +12,21 @@ ENV_TENANT_ID_KEY = "ASISTENTEIA_MS_TENANT_ID"
 
 DEFAULT_TENANT_ID = "common"
 GRAPH_ME_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
-SCOPES = ["User.Read"]
+
+# "User.Read" alcanza solo para el login (nombre del usuario). Para leer
+# correo y crear tickets en una Lista de SharePoint hacen falta estos
+# permisos adicionales de Microsoft Graph:
+#   - Mail.Read           → leer el buzón para detectar solicitudes de ticket
+#   - Sites.ReadWrite.All → crear elementos en la Lista de SharePoint
+# Estos dos últimos suelen requerir consentimiento de un administrador de
+# Microsoft 365 la primera vez que alguien de la organización inicia sesión
+# (Entra ID > Enterprise Applications > Permisos, o el propio prompt de
+# consentimiento durante el login). Si tu organización prefiere acotar el
+# acceso a un único sitio en vez de "todos los sitios", se puede reemplazar
+# Sites.ReadWrite.All por Sites.Selected, pero eso exige un paso extra de
+# configuración (otorgar acceso a ese sitio puntual vía Graph con permisos
+# de aplicación) que no se puede hacer solo con este login de usuario.
+SCOPES = ["User.Read", "Mail.Read", "Sites.ReadWrite.All"]
 
 TOKEN_CACHE_PATH = USER_DATA_DIR / "ms_token_cache.bin"
 
@@ -126,6 +140,18 @@ class MicrosoftAuthService:
 
     @staticmethod
     def get_display_name(token_result: dict) -> Optional[str]:
+        profile = MicrosoftAuthService.get_profile(token_result)
+        if not profile:
+            return None
+        return profile.get("givenName") or profile.get("displayName")
+
+    @staticmethod
+    def get_profile(token_result: dict) -> Optional[dict]:
+        """
+        Trae el perfil completo de la cuenta logueada desde Microsoft Graph
+        (/me) — nombre, correo, cargo, área y sede — para mostrarlo en el
+        panel de perfil de la app. Devuelve None si no se pudo consultar.
+        """
         access_token = token_result.get("access_token")
         if not access_token:
             return None
@@ -143,7 +169,28 @@ class MicrosoftAuthService:
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
             return None
 
-        return data.get("givenName") or data.get("displayName")
+        return {
+            "displayName": data.get("displayName"),
+            "givenName": data.get("givenName"),
+            "email": data.get("mail") or data.get("userPrincipalName"),
+            "jobTitle": data.get("jobTitle"),
+            "department": data.get("department"),
+            "officeLocation": data.get("officeLocation"),
+        }
+
+    def get_cached_access_token(self) -> Optional[str]:
+        """
+        Devuelve un access token válido usando solo el caché local (sin
+        interacción). Lo usan los servicios en segundo plano (ej. el chequeo
+        periódico de correo para tickets) que no pueden mostrarle un código
+        de login a nadie. Si no hay sesión cacheada con los scopes
+        necesarios, devuelve None — quien llama debe pedirle al usuario que
+        inicie sesión una vez desde la UI para otorgar el consentimiento.
+        """
+        result = self.try_silent_login()
+        if result and "access_token" in result:
+            return result["access_token"]
+        return None
 
     def logout(self) -> None:
         if TOKEN_CACHE_PATH.exists():

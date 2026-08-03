@@ -39,6 +39,16 @@ class AppSettings:
     last_update_check: str = ""
     silent_updates_enabled: bool = False
 
+    # --- Tickets (SharePoint) ---
+    ticket_sharepoint_site_id: str = ""
+    ticket_sharepoint_list_id: str = ""
+    # JSON: {"titulo": "Title", "descripcion": "Descripci_x00f3_n1", ...}
+    # -> nombres internos de columna reales de la Lista (usar
+    #    GraphClient.list_columns() una vez para confirmarlos).
+    ticket_field_mapping: str = "{}"
+    ticket_email_sender_filter: str = ""
+    ticket_auto_check_email: bool = False
+
 
 class AppConfig:
 

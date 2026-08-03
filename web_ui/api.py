@@ -13,9 +13,11 @@ import webview
 
 from ai.copilot import GitHubCopilotProvider
 from ai.gemini import GeminiProvider
+from ai.llama import LlamaProvider
 from ai.openai import OpenAIProvider
 from config.app_config import AppConfig
 from core.audio_recorder import AudioRecorder, AudioRecordingError, has_input_device
+from core.graph_client import GraphClient
 from core.microsoft_auth import MicrosoftAuthService
 from core.microsoft_auth import is_configured as ms_login_configured
 from core.version import APP_BUILD, APP_VERSION, BUILD_DATE
@@ -29,6 +31,7 @@ from services.knowledge_base import (
     UnsupportedFileTypeError,
 )
 from services.qa_log_service import OUT_OF_SCOPE_ENGINE, QALogService
+from services.ticket_service import DEFAULT_TICKET_SCHEMA, TicketService
 from services.update_manager import UpdateManager
 
 AI_ENGINE_NAME = "GitHub Copilot"
@@ -36,6 +39,7 @@ AI_PROVIDERS = {
     "GitHub Copilot": GitHubCopilotProvider,
     "OpenAI": OpenAIProvider,
     "Gemini": GeminiProvider,
+    "Llama (interno)": LlamaProvider,
 }
 
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -78,6 +82,7 @@ class Api:
     def __init__(self) -> None:
         self._window: Optional[webview.Window] = None
         self._display_name: Optional[str] = None
+        self._profile: dict = {}
         self._config = AppConfig()
         knowledge_store = KnowledgeStore()
         self._knowledge_base = KnowledgeBase(store=knowledge_store)
@@ -95,6 +100,7 @@ class Api:
         self._stop_requested = False
         self._audio_recorder = AudioRecorder()
         self._auth_service = MicrosoftAuthService()
+        self._ticket_service = TicketService(graph_client=GraphClient(self._auth_service))
 
     def set_window(self, window: webview.Window) -> None:
         self._window = window
@@ -113,7 +119,8 @@ class Api:
     def try_silent_login(self) -> dict:
         result = self._auth_service.try_silent_login()
         if result and "access_token" in result:
-            self._display_name = self._auth_service.get_display_name(result) or "Usuario"
+            self._profile = self._auth_service.get_profile(result) or {}
+            self._display_name = self._profile.get("givenName") or self._profile.get("displayName") or "Usuario"
             return {"success": True, "displayName": self._display_name}
         return {"success": False}
 
@@ -124,15 +131,39 @@ class Api:
         def worker() -> None:
             success, result, message = self._auth_service.login_with_device_code(on_code_ready)
             if success and result:
-                self._display_name = self._auth_service.get_display_name(result) or "Usuario"
+                self._profile = self._auth_service.get_profile(result) or {}
+                self._display_name = self._profile.get("givenName") or self._profile.get("displayName") or "Usuario"
                 self._push("login_complete", {"success": True, "displayName": self._display_name})
             else:
                 self._push("login_complete", {"success": False, "message": message})
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def get_profile(self) -> dict:
+        """
+        Perfil de la cuenta logueada para el panel desplegable de la barra
+        lateral. Si es sesión invitada, devuelve solo isGuest=True.
+        """
+        if not self._profile:
+            return {"isGuest": True}
+        return {
+            "isGuest": False,
+            "displayName": self._profile.get("displayName") or self._display_name or "Usuario",
+            "email": self._profile.get("email") or "",
+            "jobTitle": self._profile.get("jobTitle") or "",
+            "department": self._profile.get("department") or "",
+            "officeLocation": self._profile.get("officeLocation") or "",
+        }
+
+    def logout(self) -> dict:
+        self._auth_service.logout()
+        self._display_name = None
+        self._profile = {}
+        return {"success": True}
+
     def continue_as_guest(self) -> dict:
         self._display_name = None
+        self._profile = {}
         return {"success": True, "displayName": None}
 
     def start_new_conversation(self) -> dict:
@@ -614,6 +645,105 @@ class Api:
             f"Sistema operativo: {status['operatingSystem']}",
         ]
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Tickets (SharePoint)
+    # ------------------------------------------------------------------
+
+    def preview_ticket_from_conversation(self, conversation_id: Optional[int] = None) -> dict:
+        """
+        Genera un BORRADOR de ticket a partir de la conversación actual —
+        no sube nada todavía. El usuario ve los campos extraídos en la UI,
+        puede corregirlos, y solo si confirma se llama a submit_ticket().
+        """
+        conversation_id = conversation_id or self._active_conversation_id
+        if conversation_id is None:
+            return {"ok": False, "error": "No hay una conversación activa."}
+
+        messages = self._conversation_service.get_conversation_messages(conversation_id)
+        source_text = "\n".join(f"{'Usuario' if m.is_user else 'Vicky'}: {m.content}" for m in messages[-20:])
+
+        fields = self._ticket_service.extract_fields(self._active_provider, source_text)
+        draft = self._ticket_service.build_draft(fields, source="chat")
+        return {
+            "ok": True,
+            "fields": draft.fields,
+            "missingRequired": draft.missing_required,
+            "schema": DEFAULT_TICKET_SCHEMA,
+        }
+
+    def check_pending_email_tickets(self) -> dict:
+        """
+        Revisa el correo reciente y devuelve BORRADORES de ticket detectados
+        (no sube nada). Pensado para que un admin los revise en una vista de
+        'Tickets pendientes' y confirme uno por uno con submit_ticket().
+        """
+        settings = self._config.settings
+        drafts = self._ticket_service.find_ticket_requests_in_email(
+            self._active_provider,
+            sender_filter=settings.ticket_email_sender_filter or None,
+        )
+
+        results = []
+        for draft in drafts:
+            if draft.error:
+                return {"ok": False, "error": draft.error}
+            results.append({
+                "fields": draft.fields,
+                "missingRequired": draft.missing_required,
+                "emailMessageId": draft.email_message_id,
+                "emailSubject": draft.email_subject,
+                "emailFrom": draft.email_from,
+            })
+        return {"ok": True, "drafts": results, "schema": DEFAULT_TICKET_SCHEMA}
+
+    def submit_ticket(self, fields: dict) -> dict:
+        """
+        Sube el ticket a la Lista de SharePoint. Se llama ÚNICAMENTE cuando
+        el usuario confirma explícitamente en la UI los campos mostrados por
+        preview_ticket_from_conversation() o check_pending_email_tickets()
+        (editados o no) — nunca automáticamente.
+        """
+        settings = self._config.settings
+        try:
+            field_mapping = json.loads(settings.ticket_field_mapping or "{}")
+        except json.JSONDecodeError:
+            return {"ok": False, "error": "El mapeo de columnas de SharePoint configurado no es un JSON válido."}
+
+        return self._ticket_service.submit_ticket(
+            settings.ticket_sharepoint_site_id,
+            settings.ticket_sharepoint_list_id,
+            fields,
+            field_mapping,
+        )
+
+    def get_ticket_settings(self) -> dict:
+        settings = self._config.settings
+        return {
+            "siteId": settings.ticket_sharepoint_site_id,
+            "listId": settings.ticket_sharepoint_list_id,
+            "fieldMapping": settings.ticket_field_mapping,
+            "emailSenderFilter": settings.ticket_email_sender_filter,
+            "autoCheckEmail": settings.ticket_auto_check_email,
+        }
+
+    def update_ticket_settings(
+        self, site_id: str = "", list_id: str = "", field_mapping: str = "",
+        email_sender_filter: str = "", auto_check_email: bool = False,
+    ) -> dict:
+        try:
+            json.loads(field_mapping or "{}")
+        except json.JSONDecodeError:
+            return {"ok": False, "error": "El mapeo de columnas debe ser un JSON válido, ej: {\"nombre_solicitante\": \"Title\"}"}
+
+        self._config.update(
+            ticket_sharepoint_site_id=site_id.strip(),
+            ticket_sharepoint_list_id=list_id.strip(),
+            ticket_field_mapping=field_mapping.strip() or "{}",
+            ticket_email_sender_filter=email_sender_filter.strip(),
+            ticket_auto_check_email=bool(auto_check_email),
+        )
+        return {"ok": True}
 
     def check_updates_now(self) -> None:
         import datetime

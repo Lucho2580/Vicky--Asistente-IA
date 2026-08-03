@@ -413,7 +413,6 @@ async function loadHistory() {
     const label = document.createElement("div");
     label.className = "history-group-label has-visible";
     label.dataset.group = group.group;
-    label.style.cssText = "font-size:11px;color:var(--text-muted);margin:14px 0 6px 0;";
     label.textContent = group.group.toUpperCase();
     container.appendChild(label);
 
@@ -476,6 +475,12 @@ function filterHistory(query) {
     const anyVisible = groups.get(label.dataset.group) || false;
     label.classList.toggle("has-visible", anyVisible);
   });
+
+  const anyVisibleAtAll = Array.from(groups.values()).some(Boolean);
+  const emptyState = document.getElementById("history-empty-state");
+  if (emptyState) {
+    emptyState.style.display = (normalized && !anyVisibleAtAll) ? "flex" : "none";
+  }
 }
 
 document.getElementById("history-search").addEventListener("input", (e) => {
@@ -550,6 +555,106 @@ document.getElementById("btn-copy-diagnostics").addEventListener("click", async 
 
 document.getElementById("btn-ms-login").addEventListener("click", () => { api().start_device_login(); });
 
+document.getElementById("link-contact-it").addEventListener("click", (e) => {
+  e.preventDefault();
+  document.getElementById("login-view").classList.remove("active");
+  document.getElementById("guest-ticket-view").classList.add("active");
+});
+
+document.getElementById("btn-back-to-login").addEventListener("click", () => {
+  document.getElementById("guest-ticket-view").classList.remove("active");
+  document.getElementById("login-view").classList.add("active");
+  document.getElementById("guest-ticket-message").textContent = "";
+});
+
+const gtDetalle = document.getElementById("gt-detalle");
+const gtDetalleCount = document.getElementById("gt-detalle-count");
+gtDetalle.addEventListener("input", () => {
+  const len = gtDetalle.value.length;
+  gtDetalleCount.textContent = `${len}/250`;
+  gtDetalleCount.parentElement.classList.toggle("over-limit", len >= 250);
+});
+
+document.getElementById("btn-submit-guest-ticket").addEventListener("click", async () => {
+  const requerimiento = document.getElementById("gt-requerimiento").value.trim();
+  const tipo = document.getElementById("gt-tipo").value;
+  const cedula = document.getElementById("gt-cedula").value.trim();
+  const nombre = document.getElementById("gt-nombre").value.trim();
+  const correo = document.getElementById("gt-correo").value.trim();
+  const celular = document.getElementById("gt-celular").value.trim();
+  const detalle = document.getElementById("gt-detalle").value.trim();
+  const anydesk = document.getElementById("gt-anydesk").value.trim();
+
+  const messageEl = document.getElementById("guest-ticket-message");
+  const setMessage = (text, tone) => {
+    messageEl.innerHTML = "";
+    if (!text) return;
+    if (tone) {
+      const dot = document.createElement("span");
+      dot.className = "status-dot";
+      dot.style.background = tone;
+      messageEl.appendChild(dot);
+    }
+    const span = document.createElement("span");
+    span.style.color = tone || "var(--text-600)";
+    span.textContent = text;
+    messageEl.appendChild(span);
+  };
+
+  const faltantes = [];
+  if (!requerimiento) faltantes.push("requerimiento en");
+  if (!tipo) faltantes.push("tipo de solicitud");
+  if (!cedula) faltantes.push("cédula");
+  if (!nombre) faltantes.push("nombre del solicitante");
+  if (!correo) faltantes.push("correo del solicitante");
+  if (!celular) faltantes.push("celular del solicitante");
+  if (!detalle) faltantes.push("detalle de la solicitud");
+
+  if (faltantes.length) {
+    setMessage("Falta completar: " + faltantes.join(", ") + ".", "var(--status-red)");
+    return;
+  }
+
+  if (detalle.length > 250) {
+    setMessage("El detalle de la solicitud supera los 250 caracteres. Resumilo un poco.", "var(--status-red)");
+    return;
+  }
+
+  const submitBtn = document.getElementById("btn-submit-guest-ticket");
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Enviando...";
+  setMessage("");
+
+  try {
+    const result = await api().submit_ticket({
+      requerimiento_en: requerimiento,
+      tipo_solicitud: tipo,
+      cedula: cedula,
+      nombre_solicitante: nombre,
+      correo_solicitante: correo,
+      celular_solicitante: celular,
+      detalle_solicitud: detalle,
+      id_anydesk: anydesk,
+    });
+
+    if (result.ok) {
+      setMessage("Ticket enviado. Mesa de Ayuda de IT te va a contactar a " + correo + ".", "var(--status-green)");
+      ["gt-requerimiento", "gt-cedula", "gt-nombre", "gt-correo", "gt-celular", "gt-detalle", "gt-anydesk"].forEach((id) => {
+        document.getElementById(id).value = "";
+      });
+      gtDetalleCount.textContent = "0/250";
+      gtDetalleCount.parentElement.classList.remove("over-limit");
+    } else {
+      setMessage("No se pudo enviar el ticket: " + (result.error || "error desconocido") + ".", "var(--status-red)");
+    }
+  } catch (err) {
+    setMessage("No se pudo enviar el ticket. Intentá de nuevo en un momento.", "var(--status-red)");
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Enviar ticket";
+  }
+});
+
 function enterApp(displayName) {
   document.getElementById("login-view").classList.remove("active");
   document.getElementById("app").style.display = "flex";
@@ -558,7 +663,16 @@ function enterApp(displayName) {
     ? displayName.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()
     : "IN";
   api().connect_ai_provider().then((result) => {
-    document.getElementById("ai-status").textContent = (result.connected ? "🟢 IA · " : "🔴 ") + result.engine;
+    const statusEl = document.getElementById("ai-status");
+    statusEl.innerHTML = "";
+    statusEl.classList.toggle("online", result.connected);
+    statusEl.classList.toggle("offline", !result.connected);
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    const label = document.createElement("span");
+    label.textContent = result.connected ? ("IA · " + result.engine) : "Sin conexión";
+    statusEl.appendChild(dot);
+    statusEl.appendChild(label);
   });
 }
 
@@ -703,4 +817,82 @@ chatView.addEventListener("drop", async (e) => {
     document.getElementById("attachment-name").textContent = "📎 " + result.name;
   };
   reader.readAsDataURL(file);
+});
+
+// ---------------------------------------------------------------------
+// Chips de preguntas frecuentes (pantalla de Inicio)
+// ---------------------------------------------------------------------
+document.querySelectorAll(".faq-chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    const textEntry = document.getElementById("text-entry");
+    textEntry.value = chip.dataset.prompt || "";
+    sendMessage();
+  });
+});
+
+// ---------------------------------------------------------------------
+// Panel de perfil desplegable (info de la cuenta de Microsoft + cerrar sesión)
+// ---------------------------------------------------------------------
+const userToggle = document.getElementById("sidebar-user-toggle");
+
+async function openProfilePanel() {
+  const profile = await api().get_profile();
+  const detailsEl = document.getElementById("profile-details");
+  detailsEl.innerHTML = "";
+
+  if (profile.isGuest) {
+    document.getElementById("profile-name").textContent = "Invitado";
+    document.getElementById("profile-email").textContent = "Sesión sin cuenta corporativa";
+    document.getElementById("profile-avatar").textContent = "IN";
+  } else {
+    document.getElementById("profile-name").textContent = profile.displayName || "Usuario";
+    document.getElementById("profile-email").textContent = profile.email || "";
+    document.getElementById("profile-avatar").textContent = (profile.displayName || "U")
+      .split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+
+    const rows = [
+      ["Cargo", profile.jobTitle],
+      ["Área", profile.department],
+      ["Sede", profile.officeLocation],
+    ];
+    rows.forEach(([label, value]) => {
+      if (!value) return;
+      const row = document.createElement("div");
+      row.className = "profile-panel-detail-row";
+      row.innerHTML = `<span class="profile-panel-detail-label">${label}</span><span class="profile-panel-detail-value"></span>`;
+      row.querySelector(".profile-panel-detail-value").textContent = value;
+      detailsEl.appendChild(row);
+    });
+  }
+}
+
+userToggle.addEventListener("click", async (e) => {
+  const isOpen = userToggle.classList.contains("open");
+  if (isOpen) {
+    userToggle.classList.remove("open");
+    return;
+  }
+  userToggle.classList.add("open");
+  await openProfilePanel();
+});
+
+document.getElementById("profile-panel").addEventListener("click", (e) => e.stopPropagation());
+
+document.addEventListener("click", (e) => {
+  if (!userToggle.contains(e.target)) userToggle.classList.remove("open");
+});
+
+document.getElementById("btn-logout").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  userToggle.classList.remove("open");
+  await api().logout();
+
+  document.getElementById("app").style.display = "none";
+  document.getElementById("login-view").classList.add("active");
+  document.getElementById("login-message").textContent = "";
+  document.getElementById("login-code-box").style.display = "none";
+  document.getElementById("login-code-box").innerHTML = "";
+  document.getElementById("user-name").textContent = "Invitado";
+  document.getElementById("user-avatar").textContent = "IN";
+  currentConversationId = null;
 });
